@@ -1,0 +1,1 @@
+# Synthesis Studio — FastAPI Backend
