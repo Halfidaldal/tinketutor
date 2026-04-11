@@ -72,6 +72,8 @@ def get_embedding_provider() -> EmbeddingProvider:
     """Create embedding provider for retrieval."""
     if not settings.retrieval_enable_vector:
         return NoOpEmbeddingProvider()
+    if settings.llm_provider != "google_vertex":
+        return NoOpEmbeddingProvider()
     return LLMEmbeddingProvider(get_llm_provider(role="structured"))
 
 

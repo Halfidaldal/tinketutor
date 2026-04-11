@@ -23,6 +23,7 @@ export default function CanvasInspector({
   onClose,
   onSaveNode,
   onSaveEdge,
+  stacked = false,
 }: {
   selection: CanvasSelectionContext;
   onClose: () => void;
@@ -35,6 +36,7 @@ export default function CanvasInspector({
     label?: string;
     summary?: string;
   }) => Promise<void>;
+  stacked?: boolean;
 }) {
   const { t } = useI18n();
   const [label, setLabel] = useState('');
@@ -105,7 +107,8 @@ export default function CanvasInspector({
       style={{
         width: '100%',
         minWidth: 0,
-        borderLeft: '1px solid var(--color-border-primary)',
+        borderLeft: stacked ? 'none' : '1px solid var(--color-border-primary)',
+        borderTop: stacked ? '1px solid var(--color-border-primary)' : 'none',
         background: 'var(--color-bg-secondary)',
         display: 'flex',
         flexDirection: 'column',

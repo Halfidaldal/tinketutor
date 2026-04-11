@@ -25,7 +25,7 @@ class GoogleVertexProvider(LLMProvider):
     """
     Google Vertex AI / Gemini LLM provider.
 
-    Uses: gemini-1.5-pro for generation, text-embedding-004 for embeddings.
+    Uses: Gemini models on Vertex AI for generation and text-embedding-004 for embeddings.
     Region: europe-west1 (per deployment requirements).
 
     NOTE: Do NOT import google.generativeai or vertexai outside this file.

@@ -1,22 +1,18 @@
 'use client';
 
-/**
- * Workspace Layout — Three-Panel Design
- *
- * per product contract: 
- * - Left sidebar: source list + upload
- * - Center: active tab content (Canvas, Tutor, Quiz, Gaps)
- * - Right: reserved panel (evidence/tutor context)
- *
- * Fetches notebook detail on mount, provides data to child pages via context.
- */
-
 import Link from 'next/link';
 import { useParams, usePathname } from 'next/navigation';
-import { createContext, useContext, useEffect, useState, useCallback, useRef } from 'react';
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useState,
+} from 'react';
+
+import TutorPanel from '../../../components/tutor/TutorPanel';
 import { api } from '../../../lib/api';
-import { useAuth, useRequireAuth } from '../../../lib/hooks';
-import { useI18n } from '../../../lib/i18n';
 import type {
   CanvasSelectionContext,
   ConceptEdgeDTO,
@@ -24,9 +20,13 @@ import type {
   ConceptMapEnvelope,
   ConceptNodeDTO,
 } from '../../../lib/concept-map';
-import StudySupportPanel from '../../../components/workspace/StudySupportPanel';
-
-// ---- Shared Types ----
+import { useAuth, useRequireAuth } from '../../../lib/hooks';
+import { useI18n } from '../../../lib/i18n';
+import {
+  syncWorkspaceFocusWithGraph,
+  toCanvasSelection,
+  type WorkspaceFocus,
+} from '../../../lib/workspace-focus';
 
 interface Source {
   id: string;
@@ -56,12 +56,16 @@ interface WorkspaceState {
   conceptMap: ConceptMapDTO | null;
   nodes: ConceptNodeDTO[];
   edges: ConceptEdgeDTO[];
+  focus: WorkspaceFocus;
   selection: CanvasSelectionContext;
+  workspacePaneOpen: boolean;
   loading: boolean;
   error: string | null;
   refreshSources: () => Promise<void>;
   refreshWorkspace: () => Promise<void>;
+  setFocus: (focus: WorkspaceFocus) => void;
   setSelection: (selection: CanvasSelectionContext) => void;
+  setWorkspacePaneOpen: (open: boolean) => void;
   setConceptGraph: (graph: ConceptMapEnvelope | null) => void;
   updateNodeInWorkspace: (node: ConceptNodeDTO) => void;
   updateEdgeInWorkspace: (edge: ConceptEdgeDTO) => void;
@@ -73,12 +77,16 @@ const WorkspaceContext = createContext<WorkspaceState>({
   conceptMap: null,
   nodes: [],
   edges: [],
+  focus: null,
   selection: null,
+  workspacePaneOpen: true,
   loading: true,
   error: null,
   refreshSources: async () => {},
   refreshWorkspace: async () => {},
+  setFocus: () => {},
   setSelection: () => {},
+  setWorkspacePaneOpen: () => {},
   setConceptGraph: () => {},
   updateNodeInWorkspace: () => {},
   updateEdgeInWorkspace: () => {},
@@ -88,73 +96,12 @@ export function useWorkspace() {
   return useContext(WorkspaceContext);
 }
 
-function syncSelectionWithGraph(
-  selection: CanvasSelectionContext,
-  conceptMap: ConceptMapDTO | null,
-  nodes: ConceptNodeDTO[],
-  edges: ConceptEdgeDTO[],
-): CanvasSelectionContext {
-  if (!selection || !conceptMap || selection.conceptMapId !== conceptMap.id) {
-    return null;
-  }
-
-  if (selection.type === 'node') {
-    const node = nodes.find((candidate) => candidate.id === selection.node.id);
-    return node ? { type: 'node', conceptMapId: conceptMap.id, node } : null;
-  }
-
-  const edge = edges.find((candidate) => candidate.id === selection.edge.id);
-  if (!edge) {
-    return null;
-  }
-  const sourceLabel = nodes.find((candidate) => candidate.id === edge.source_node_id)?.label || selection.sourceLabel;
-  const targetLabel = nodes.find((candidate) => candidate.id === edge.target_node_id)?.label || selection.targetLabel;
-  return {
-    type: 'edge',
-    conceptMapId: conceptMap.id,
-    edge,
-    sourceLabel,
-    targetLabel,
-  };
-}
-
-// ---- Tabs Config ----
-
 const WORKSPACE_TABS = [
   { id: 'sources', labelKey: 'workspace.tabs.sources', icon: '📄', href: '' },
   { id: 'canvas', labelKey: 'workspace.tabs.knowledgeMap', icon: '🧠', href: '/canvas' },
-  { id: 'tutor', labelKey: 'workspace.tabs.tutor', icon: '🎓', href: '/tutor' },
   { id: 'quiz', labelKey: 'workspace.tabs.quiz', icon: '📝', href: '/quiz' },
   { id: 'gaps', labelKey: 'workspace.tabs.gaps', icon: '🔍', href: '/gaps' },
 ] as const;
-
-// ---- Status Badge ----
-
-const STATUS_CONFIG: Record<string, { color: string; labelKey: string }> = {
-  uploaded: { color: 'var(--color-info)', labelKey: 'workspace.sourceStatus.uploaded' },
-  processing: { color: 'var(--color-warning)', labelKey: 'workspace.sourceStatus.processing' },
-  ready: { color: 'var(--color-success)', labelKey: 'workspace.sourceStatus.ready' },
-  failed: { color: 'var(--color-error)', labelKey: 'workspace.sourceStatus.failed' },
-};
-
-function SourceStatusDot({ status }: { status: string }) {
-  const { t } = useI18n();
-  const cfg = STATUS_CONFIG[status] || STATUS_CONFIG.failed;
-  return (
-    <span style={{
-      display: 'inline-flex', alignItems: 'center', gap: '0.25rem',
-      fontSize: '0.6875rem', fontWeight: 500, color: cfg.color,
-    }}>
-      <span style={{
-        width: 6, height: 6, borderRadius: '50%', background: cfg.color,
-        animation: status === 'processing' ? 'pulse-soft 1.5s infinite' : 'none',
-      }} />
-      {t(cfg.labelKey)}
-    </span>
-  );
-}
-
-// ---- Layout ----
 
 export default function WorkspaceLayout({ children }: { children: React.ReactNode }) {
   const { t } = useI18n();
@@ -170,42 +117,38 @@ export default function WorkspaceLayout({ children }: { children: React.ReactNod
   const [conceptMap, setConceptMap] = useState<ConceptMapDTO | null>(null);
   const [nodes, setNodes] = useState<ConceptNodeDTO[]>([]);
   const [edges, setEdges] = useState<ConceptEdgeDTO[]>([]);
-  const [selection, setSelection] = useState<CanvasSelectionContext>(null);
+  const [focus, setFocus] = useState<WorkspaceFocus>(null);
+  const [workspacePaneOpen, setWorkspacePaneOpen] = useState(true);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  // Upload state
-  const [uploading, setUploading] = useState(false);
-  const fileInputRef = useRef<HTMLInputElement>(null);
+  const selection = useMemo(() => toCanvasSelection(focus), [focus]);
   const hasActiveSourceProcessing = sources.some(
-    (source) => source.status === 'uploaded' || source.status === 'processing'
+    (source) => source.status === 'uploaded' || source.status === 'processing',
   );
 
-  const applyWorkspaceGraph = useCallback(
-    (graph: ConceptMapEnvelope | null) => {
-      const nextConceptMap = graph?.concept_map || null;
-      const nextNodes = graph?.nodes || [];
-      const nextEdges = graph?.edges || [];
-      setConceptMap(nextConceptMap);
-      setNodes(nextNodes);
-      setEdges(nextEdges);
-      setSelection((current) => syncSelectionWithGraph(current, nextConceptMap, nextNodes, nextEdges));
-    },
-    [],
-  );
+  const applyWorkspaceGraph = useCallback((graph: ConceptMapEnvelope | null) => {
+    const nextConceptMap = graph?.concept_map || null;
+    const nextNodes = graph?.nodes || [];
+    const nextEdges = graph?.edges || [];
+    setConceptMap(nextConceptMap);
+    setNodes(nextNodes);
+    setEdges(nextEdges);
+    setFocus((current) => syncWorkspaceFocusWithGraph(current, nextConceptMap, nextNodes, nextEdges));
+  }, []);
 
   const updateNodeInWorkspace = useCallback((updatedNode: ConceptNodeDTO) => {
-    setNodes((current) => {
-      const nextNodes = current.map((node) => node.id === updatedNode.id ? updatedNode : node);
-      setSelection((currentSelection) => syncSelectionWithGraph(currentSelection, conceptMap, nextNodes, edges));
+    setNodes((currentNodes) => {
+      const nextNodes = currentNodes.map((node) => node.id === updatedNode.id ? updatedNode : node);
+      setFocus((currentFocus) => syncWorkspaceFocusWithGraph(currentFocus, conceptMap, nextNodes, edges));
       return nextNodes;
     });
   }, [conceptMap, edges]);
 
   const updateEdgeInWorkspace = useCallback((updatedEdge: ConceptEdgeDTO) => {
-    setEdges((current) => {
-      const nextEdges = current.map((edge) => edge.id === updatedEdge.id ? updatedEdge : edge);
-      setSelection((currentSelection) => syncSelectionWithGraph(currentSelection, conceptMap, nodes, nextEdges));
+    setEdges((currentEdges) => {
+      const nextEdges = currentEdges.map((edge) => edge.id === updatedEdge.id ? updatedEdge : edge);
+      setFocus((currentFocus) => syncWorkspaceFocusWithGraph(currentFocus, conceptMap, nodes, nextEdges));
       return nextEdges;
     });
   }, [conceptMap, nodes]);
@@ -228,7 +171,7 @@ export default function WorkspaceLayout({ children }: { children: React.ReactNod
       applyWorkspaceGraph(
         data.concept_map
           ? { concept_map: data.concept_map, nodes: data.nodes, edges: data.edges }
-          : null
+          : null,
       );
     } catch (err) {
       setError(err instanceof Error ? err.message : t('dashboard.loadError'));
@@ -249,7 +192,7 @@ export default function WorkspaceLayout({ children }: { children: React.ReactNod
 
   useEffect(() => {
     if (!authLoading && isAuthenticated) {
-      fetchNotebook();
+      fetchNotebook().catch(() => undefined);
     }
   }, [authLoading, fetchNotebook, isAuthenticated]);
 
@@ -265,37 +208,25 @@ export default function WorkspaceLayout({ children }: { children: React.ReactNod
     return () => window.clearInterval(intervalId);
   }, [hasActiveSourceProcessing, isAuthenticated, refreshWorkspace]);
 
-  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-
-    setUploading(true);
-    try {
-      const formData = new FormData();
-      formData.append('file', file);
-      formData.append('title', file.name.replace(/\.[^/.]+$/, ''));
-      formData.append('notebookId', notebookId);
-      await api.sources.upload(formData);
-      await refreshSources();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : t('sourcesPage.uploadFailed'));
-    } finally {
-      setUploading(false);
-      if (fileInputRef.current) fileInputRef.current.value = '';
+  const activeTab = useMemo(() => {
+    if (pathname === basePath || pathname === `${basePath}/sources`) {
+      return 'sources';
     }
-  };
 
-  const activeTab = WORKSPACE_TABS.find(
-    (tab) => pathname === `${basePath}${tab.href}`
-  )?.id || 'sources';
+    return WORKSPACE_TABS.find((tab) => pathname === `${basePath}${tab.href}`)?.id || 'sources';
+  }, [basePath, pathname]);
 
-  // Loading state
   if (authLoading || !user || loading) {
     return (
-      <div style={{
-        height: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center',
-        background: 'var(--color-bg-primary)',
-      }}>
+      <div
+        style={{
+          height: '100vh',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          background: 'var(--color-bg-primary)',
+        }}
+      >
         <div style={{ textAlign: 'center' }}>
           <div className="skeleton-loading" style={{ width: 200, height: 24, margin: '0 auto 0.75rem' }} />
           <div className="skeleton-loading" style={{ width: 140, height: 16, margin: '0 auto' }} />
@@ -304,21 +235,33 @@ export default function WorkspaceLayout({ children }: { children: React.ReactNod
     );
   }
 
-  // Error state
   if (error && !notebook) {
     return (
-      <div style={{
-        height: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center',
-        background: 'var(--color-bg-primary)',
-      }}>
+      <div
+        style={{
+          height: '100vh',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          background: 'var(--color-bg-primary)',
+        }}
+      >
         <div className="surface" style={{ padding: '2rem', textAlign: 'center', maxWidth: 400 }}>
           <div style={{ fontSize: '2rem', marginBottom: '0.75rem' }}>⚠️</div>
           <p style={{ color: 'var(--color-error)', marginBottom: '1rem' }}>{error}</p>
-          <Link href="/dashboard" style={{
-            padding: '0.5rem 1rem', background: 'var(--color-accent-primary)',
-            color: '#fff', borderRadius: 'var(--radius-md)', fontSize: '0.875rem',
-            textDecoration: 'none',
-          }}>Back to Dashboard</Link>
+          <Link
+            href="/dashboard"
+            style={{
+              padding: '0.5rem 1rem',
+              background: 'var(--color-accent-primary)',
+              color: '#fff',
+              borderRadius: 'var(--radius-md)',
+              fontSize: '0.875rem',
+              textDecoration: 'none',
+            }}
+          >
+            Back to Dashboard
+          </Link>
         </div>
       </div>
     );
@@ -332,75 +275,105 @@ export default function WorkspaceLayout({ children }: { children: React.ReactNod
         conceptMap,
         nodes,
         edges,
+        focus,
         selection,
+        workspacePaneOpen,
         loading,
         error,
         refreshSources,
         refreshWorkspace,
-        setSelection,
+        setFocus,
+        setSelection: (nextSelection) => setFocus(nextSelection),
+        setWorkspacePaneOpen,
         setConceptGraph: applyWorkspaceGraph,
         updateNodeInWorkspace,
         updateEdgeInWorkspace,
       }}
     >
-      <div style={{
-        height: '100vh', display: 'flex', flexDirection: 'column',
-        background: 'var(--color-bg-primary)', overflow: 'hidden',
-      }}>
-        {/* Top Bar */}
-        <header className="glass" style={{
-          height: 'var(--header-height)',
-          display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-          padding: '0 1rem', borderBottom: '1px solid var(--color-border-primary)',
-          flexShrink: 0,
-        }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
-            <Link href="/dashboard" style={{
-              color: 'var(--color-text-tertiary)', fontSize: '0.8125rem',
-              textDecoration: 'none', display: 'flex', alignItems: 'center', gap: '0.375rem',
-            }}>
+      <div
+        className={`workspace-shell ${workspacePaneOpen ? 'workspace-open' : 'workspace-closed'}`}
+        style={{
+          height: '100vh',
+          display: 'flex',
+          flexDirection: 'column',
+          background: 'var(--color-bg-primary)',
+          overflow: 'hidden',
+        }}
+      >
+        <header
+          className="glass"
+          style={{
+            height: 'var(--header-height)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            padding: '0 1rem',
+            borderBottom: '1px solid var(--color-border-primary)',
+            flexShrink: 0,
+            gap: '1rem',
+          }}
+        >
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', minWidth: 0 }}>
+            <Link
+              href="/dashboard"
+              style={{
+                color: 'var(--color-text-tertiary)',
+                fontSize: '0.8125rem',
+                textDecoration: 'none',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '0.375rem',
+                whiteSpace: 'nowrap',
+              }}
+            >
               ← {t('workspace.back')}
             </Link>
             <span style={{ color: 'var(--color-border-secondary)', fontSize: '0.875rem' }}>|</span>
-            <h1 style={{
-              fontSize: '0.9375rem', fontWeight: 600,
-              color: 'var(--color-text-primary)', margin: 0,
-            }}>
-              {notebook?.title || t('dashboard.notebookFallback')}
-            </h1>
-            {notebook?.description && (
-              <span style={{ fontSize: '0.75rem', color: 'var(--color-text-tertiary)' }}>
-                — {notebook.description}
-              </span>
-            )}
-          </div>
-
-          {/* Tab Navigation */}
-          <nav style={{ display: 'flex', gap: '0.125rem' }}>
-            {WORKSPACE_TABS.map((tab) => {
-              const isActive = activeTab === tab.id;
-              return (
-                <Link
-                  key={tab.id}
-                  id={`tab-${tab.id}`}
-                  href={`${basePath}${tab.href}`}
+            <div style={{ minWidth: 0, display: 'grid', gap: '0.1rem' }}>
+              <h1
+                style={{
+                  fontSize: '0.9375rem',
+                  fontWeight: 600,
+                  color: 'var(--color-text-primary)',
+                  margin: 0,
+                  overflow: 'hidden',
+                  textOverflow: 'ellipsis',
+                  whiteSpace: 'nowrap',
+                }}
+              >
+                {notebook?.title || t('dashboard.notebookFallback')}
+              </h1>
+              {notebook?.description && (
+                <span
                   style={{
-                    padding: '0.5rem 0.75rem', borderRadius: 'var(--radius-md)',
-                    fontSize: '0.8125rem', fontWeight: isActive ? 600 : 400,
-                    color: isActive ? 'var(--color-accent-primary)' : 'var(--color-text-secondary)',
-                    background: isActive ? 'var(--color-accent-glow)' : 'transparent',
-                    textDecoration: 'none', transition: 'var(--transition-fast)',
-                    display: 'flex', alignItems: 'center', gap: '0.25rem',
+                    fontSize: '0.75rem',
+                    color: 'var(--color-text-tertiary)',
+                    overflow: 'hidden',
+                    textOverflow: 'ellipsis',
+                    whiteSpace: 'nowrap',
                   }}
                 >
-                  <span style={{ fontSize: '0.8125rem' }}>{tab.icon}</span>
-                  {t(tab.labelKey)}
-                </Link>
-              );
-            })}
-          </nav>
+                  {notebook.description}
+                </span>
+              )}
+            </div>
+          </div>
 
-          <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', flexShrink: 0 }}>
+            <button
+              type="button"
+              onClick={() => setWorkspacePaneOpen((current) => !current)}
+              style={{
+                padding: '0.4rem 0.7rem',
+                borderRadius: 'var(--radius-md)',
+                border: '1px solid var(--color-border-secondary)',
+                background: 'transparent',
+                color: 'var(--color-text-secondary)',
+                fontSize: '0.75rem',
+              }}
+            >
+              {workspacePaneOpen ? t('workspace.hideWorkspacePane') : t('workspace.showWorkspacePane')}
+            </button>
             <span style={{ fontSize: '0.75rem', color: 'var(--color-text-tertiary)' }}>
               {user.displayName || user.email}
             </span>
@@ -421,126 +394,153 @@ export default function WorkspaceLayout({ children }: { children: React.ReactNod
           </div>
         </header>
 
-        {/* Three-Panel Body */}
-        <div style={{ flex: 1, display: 'flex', overflow: 'hidden' }}>
-          {/* Left Sidebar — Sources */}
-          <aside style={{
-            width: 'var(--sidebar-width)', flexShrink: 0,
-            borderRight: '1px solid var(--color-border-primary)',
-            display: 'flex', flexDirection: 'column',
-            background: 'var(--color-bg-secondary)',
-          }}>
-            <div style={{
-              padding: '0.75rem 1rem',
-              borderBottom: '1px solid var(--color-border-primary)',
-              display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-            }}>
-              <span style={{ fontSize: '0.8125rem', fontWeight: 600, color: 'var(--color-text-secondary)' }}>
-                {t('workspace.sourcesCounter', { values: { count: sources.length } })}
-              </span>
-              <button
-                onClick={() => fileInputRef.current?.click()}
-                disabled={uploading || sources.length >= 5}
-                style={{
-                  padding: '0.25rem 0.625rem',
-                  background: 'var(--color-accent-primary)',
-                  color: '#fff', borderRadius: 'var(--radius-sm)',
-                  fontSize: '0.75rem', fontWeight: 500,
-                  opacity: uploading || sources.length >= 5 ? 0.5 : 1,
-                }}
-              >
-                {uploading ? '…' : t('workspace.addSource')}
-              </button>
-              <input
-                ref={fileInputRef}
-                type="file"
-                accept=".pdf,.pptx,.docx"
-                onChange={handleFileUpload}
-                style={{ display: 'none' }}
-              />
-            </div>
-
-            <div style={{ flex: 1, overflow: 'auto', padding: '0.5rem' }}>
-              {sources.length === 0 ? (
-                <div style={{
-                  padding: '1.5rem 1rem', textAlign: 'center',
-                  color: 'var(--color-text-tertiary)', fontSize: '0.8125rem',
-                }}>
-                  {t('workspace.uploadPrompt')}
-                </div>
-              ) : (
-                sources.map((src) => (
-                  <div
-                    key={src.id}
-                    style={{
-                      padding: '0.625rem 0.75rem',
-                      borderRadius: 'var(--radius-md)',
-                      marginBottom: '0.25rem',
-                      background: 'transparent',
-                      transition: 'background var(--transition-fast)',
-                      cursor: 'default',
-                    }}
-                  >
-                    <div style={{
-                      fontSize: '0.8125rem', fontWeight: 500,
-                      color: 'var(--color-text-primary)',
-                      marginBottom: '0.25rem',
-                      overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-                    }}>
-                      {src.title}
-                    </div>
-                    <div style={{
-                      display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-                    }}>
-                      <span style={{ fontSize: '0.6875rem', color: 'var(--color-text-tertiary)' }}>
-                        {src.file_type.toUpperCase()}
-                        {src.status === 'ready' && src.chunk_count > 0 && ` · ${
-                          src.chunk_count === 1
-                            ? t('workspace.chunksOne')
-                            : t('workspace.chunksMany', { values: { count: src.chunk_count } })
-                        }`}
-                        {src.status === 'processing' && ` · ${src.processing_progress}%`}
-                      </span>
-                      <SourceStatusDot status={src.status} />
-                    </div>
-                    {src.error_message && (
-                      <div style={{
-                        marginTop: '0.375rem',
-                        fontSize: '0.6875rem',
-                        color: 'var(--color-error)',
-                        lineHeight: 1.4,
-                      }}>
-                        {src.error_message}
-                      </div>
-                    )}
-                  </div>
-                ))
-              )}
-            </div>
-          </aside>
-
-          {/* Center — Active Tab Content */}
-          <main style={{ flex: 1, overflow: 'auto' }}>
-            {children}
-          </main>
-
-          {/* Right Panel — Evidence / Tutor Study Support */}
-          <aside style={{
-            width: 'var(--panel-width)', flexShrink: 0,
-            borderLeft: '1px solid var(--color-border-primary)',
-            background: 'var(--color-bg-secondary)',
-            display: 'flex', flexDirection: 'column',
-          }}>
-            <StudySupportPanel
+        <div className="workspace-body">
+          <aside className="tutor-pane">
+            <TutorPanel
               notebookId={notebookId}
-              sources={sources}
-              selection={selection}
-              onClearSelection={() => setSelection(null)}
-              defaultMode={activeTab === 'tutor' ? 'tutor' : 'evidence'}
+              sources={sources.map((source) => ({
+                id: source.id,
+                title: source.title,
+                status: source.status,
+              }))}
+              focus={focus}
+              onFocusChange={setFocus}
+              onWorkspacePaneOpenChange={setWorkspacePaneOpen}
             />
           </aside>
+
+          <section className="workspace-pane">
+            <div
+              className="workspace-pane-header glass"
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                gap: '0.75rem',
+                padding: '0.75rem 1rem',
+                borderBottom: '1px solid var(--color-border-primary)',
+                flexShrink: 0,
+              }}
+            >
+              <nav style={{ display: 'flex', gap: '0.125rem', flexWrap: 'wrap' }}>
+                {WORKSPACE_TABS.map((tab) => {
+                  const isActive = activeTab === tab.id;
+                  return (
+                    <Link
+                      key={tab.id}
+                      id={`tab-${tab.id}`}
+                      href={`${basePath}${tab.href}`}
+                      style={{
+                        padding: '0.5rem 0.75rem',
+                        borderRadius: 'var(--radius-md)',
+                        fontSize: '0.8125rem',
+                        fontWeight: isActive ? 600 : 400,
+                        color: isActive ? 'var(--color-accent-primary)' : 'var(--color-text-secondary)',
+                        background: isActive ? 'var(--color-accent-glow)' : 'transparent',
+                        textDecoration: 'none',
+                        transition: 'var(--transition-fast)',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '0.25rem',
+                      }}
+                    >
+                      <span style={{ fontSize: '0.8125rem' }}>{tab.icon}</span>
+                      {t(tab.labelKey)}
+                    </Link>
+                  );
+                })}
+              </nav>
+            </div>
+
+            <div className="workspace-pane-body">
+              {children}
+            </div>
+          </section>
         </div>
       </div>
+
+      <style jsx>{`
+        .workspace-body {
+          flex: 1;
+          min-height: 0;
+          display: flex;
+          overflow: hidden;
+        }
+
+        .tutor-pane {
+          flex: 0 0 45%;
+          min-width: 340px;
+          max-width: 42rem;
+          min-height: 0;
+          background: var(--color-bg-secondary);
+          border-right: 1px solid var(--color-border-primary);
+          transition:
+            flex-basis var(--transition-slow),
+            max-width var(--transition-slow),
+            border-color var(--transition-fast);
+        }
+
+        .workspace-pane {
+          flex: 1 1 0%;
+          min-width: 0;
+          min-height: 0;
+          max-width: 100%;
+          display: flex;
+          flex-direction: column;
+          background: var(--color-bg-primary);
+          opacity: 1;
+          transform: translateX(0);
+          overflow: hidden;
+          transition:
+            max-width var(--transition-slow),
+            opacity var(--transition-slow),
+            transform var(--transition-slow),
+            border-color var(--transition-fast);
+        }
+
+        .workspace-pane-body {
+          flex: 1;
+          min-height: 0;
+          overflow: auto;
+        }
+
+        .workspace-shell.workspace-closed .tutor-pane {
+          flex: 1 1 auto;
+          max-width: none;
+        }
+
+        .workspace-shell.workspace-closed .workspace-pane {
+          flex: 0 0 0%;
+          max-width: 0;
+          opacity: 0;
+          transform: translateX(18px);
+          pointer-events: none;
+        }
+
+        @media (max-width: 1100px) {
+          .workspace-body {
+            flex-direction: column;
+          }
+
+          .tutor-pane {
+            flex: 0 0 auto;
+            min-width: 0;
+            max-width: none;
+            border-right: none;
+            border-bottom: 1px solid var(--color-border-primary);
+          }
+
+          .workspace-pane {
+            border-left: none;
+            max-height: 100%;
+          }
+
+          .workspace-shell.workspace-closed .workspace-pane {
+            max-height: 0;
+            transform: translateY(12px);
+          }
+        }
+      `}</style>
     </WorkspaceContext.Provider>
   );
 }

@@ -1,218 +1,157 @@
-# Open Notebook - Root CLAUDE.md
+# CLAUDE.md
 
-This file provides architectural guidance for contributors working on Open Notebook at the project level.
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-## Project Overview
-
-**Open Notebook** is an open-source, privacy-focused alternative to Google's Notebook LM. It's an AI-powered research assistant enabling users to upload multi-modal content (PDFs, audio, video, web pages), generate intelligent notes, search semantically, chat with AI models, and produce professional podcasts—all with complete control over data and choice of AI providers.
-
-**Key Values**: Privacy-first, multi-provider AI support, fully self-hosted option, open-source transparency.
-
----
-
-## Three-Tier Architecture
+## Repository Layout
 
 ```
-┌─────────────────────────────────────────────────────────┐
-│              Frontend (React/Next.js)                    │
-│              frontend/ @ port 3000                       │
-├─────────────────────────────────────────────────────────┤
-│ - Notebooks, sources, notes, chat, podcasts, search UI  │
-│ - Zustand state management, TanStack Query (React Query)│
-│ - Shadcn/ui component library with Tailwind CSS         │
-└────────────────────────┬────────────────────────────────┘
-                         │ HTTP REST
-┌────────────────────────▼────────────────────────────────┐
-│              API (FastAPI)                              │
-│              api/ @ port 5055                           │
-├─────────────────────────────────────────────────────────┤
-│ - REST endpoints for notebooks, sources, notes, chat    │
-│ - LangGraph workflow orchestration                      │
-│ - Job queue for async operations (podcasts)             │
-│ - Multi-provider AI provisioning via Esperanto          │
-└────────────────────────┬────────────────────────────────┘
-                         │ SurrealQL
-┌────────────────────────▼────────────────────────────────┐
-│         Database (SurrealDB)                            │
-│         Graph database @ port 8000                      │
-├─────────────────────────────────────────────────────────┤
-│ - Records: Notebook, Source, Note, ChatSession, Credential│
-│ - Relationships: source-to-notebook, note-to-source     │
-│ - Vector embeddings for semantic search                 │
-└─────────────────────────────────────────────────────────┘
+tinketutor/
+├── apps/web/          # TinkeTutor shell — Firebase-auth Next.js frontend (PRIMARY)
+├── frontend/          # Upstream Open Notebook frontend (Next.js, Zustand, Shadcn/ui)
+├── api/               # Open Notebook FastAPI backend (port 5055)
+└── open_notebook/     # Backend core: domain models, LangGraph graphs, SurrealDB
+```
+
+Active TinkeTutor development lives in `apps/web/`. The `frontend/` tree is the upstream Open Notebook UI; prefer editing `apps/web/` unless you are contributing back upstream.
+
+---
+
+## Development Commands
+
+### TinkeTutor Web Shell (`apps/web/`)
+
+```bash
+cd apps/web
+npm run dev          # Next.js dev server — http://localhost:3000
+npm run build        # Production build
+npm run lint         # ESLint
+npm test             # node --import tsx --test lib/*.test.ts
+```
+
+> **AGENTS.md warning**: This Next.js version (16.x) has breaking API changes from earlier versions. Read `node_modules/next/dist/docs/` before writing Next.js-specific code.
+
+### API Backend
+
+```bash
+# From repo root (uses uv)
+uv run uvicorn api.main:app --host 0.0.0.0 --port 5055 --reload
+
+# Run all backend tests
+uv run pytest tests/
+```
+
+### Upstream Frontend (`frontend/`)
+
+```bash
+cd frontend
+npm run dev          # http://localhost:3000
 ```
 
 ---
 
-## Useful sources
+## Architecture
 
-User documentation is at @docs/
+### Three-Tier (Upstream Open Notebook)
 
-## Tech Stack
+```
+TinkeTutor Web Shell (apps/web/) — Firebase ID-token auth
+         │  HTTP REST + Bearer token
+Open Notebook API (api/ @ port 5055)
+         │  SurrealQL
+SurrealDB (graph database @ port 8000)
+```
 
-### Frontend (`frontend/`)
-- **Framework**: Next.js 16 (React 19)
-- **Language**: TypeScript
-- **State Management**: Zustand
-- **Data Fetching**: TanStack Query (React Query)
-- **Styling**: Tailwind CSS + Shadcn/ui
-- **Build Tool**: Webpack (via Next.js)
-- **i18n compatible**: All front-end changes must also consider the translation keys
+All backend REST routes are under `/api/v1/`. The API also uses a simple password middleware (dev-only); in `apps/web/` this is bypassed — Firebase ID tokens are used instead (see auth below).
 
-### API Backend (`api/` + `open_notebook/`)
-- **Framework**: FastAPI 0.104+
-- **Language**: Python 3.11+
-- **Workflows**: LangGraph state machines
-- **Database**: SurrealDB async driver
-- **AI Providers**: Esperanto library (8+ providers: OpenAI, Anthropic, Google, Groq, Ollama, Mistral, DeepSeek, xAI)
-- **Job Queue**: Surreal-Commands for async jobs (podcasts)
-- **Logging**: Loguru
-- **Validation**: Pydantic v2
-- **Testing**: Pytest
+### LangGraph Workflows (open_notebook/graphs/)
 
-### Database
-- **SurrealDB**: Graph database with built-in embedding storage and vector search
-- **Schema Migrations**: Automatic on API startup via AsyncMigrationManager
-
-### Additional Services
-- **Content Processing**: content-core library (file/URL extraction)
-- **Prompts**: AI-Prompter with Jinja2 templating
-- **Podcast Generation**: podcast-creator library
-- **Embeddings**: Multi-provider via Esperanto
-
----
-
-## Architecture Highlights
-
-### 1. Async-First Design
-- All database queries, graph invocations, and API calls are async (await)
-- SurrealDB async driver with connection pooling
-- FastAPI handles concurrent requests efficiently
-
-### 2. LangGraph Workflows
 - **source.py**: Content ingestion (extract → embed → save)
-- **chat.py**: Conversational agent with message history
-- **ask.py**: Search + synthesis (retrieve relevant sources → LLM)
+- **chat.py**: Conversational agent with message history (SqliteSaver checkpoint)
+- **ask.py**: Search + synthesis (retrieve → LLM)
 - **transformation.py**: Custom transformations on sources
-- All use `provision_langchain_model()` for smart model selection
 
-### 3. Multi-Provider AI
-- **Esperanto library**: Unified interface to 8+ AI providers
-- **Credential system**: Individual encrypted credential records per provider; models link to credentials for direct config
-- **ModelManager**: Factory pattern with fallback logic; uses credential config when available, env vars as fallback
-- **Smart selection**: Detects large contexts, prefers long-context models
-- **Override support**: Per-request model configuration
+All use `provision_langchain_model()` for model selection. Graph state persists in `/data/sqlite-db/`.
 
-### 4. Database Schema
-- **Automatic migrations**: AsyncMigrationManager runs on API startup
-- **SurrealDB graph model**: Records with relationships and embeddings
-- **Vector search**: Built-in semantic search across all content
-- **Transactions**: Repo functions handle ACID operations
+### AI / Multi-Provider (open_notebook/ai/)
 
-### 5. Authentication
-- **Current**: Simple password middleware (insecure, dev-only)
-- **Production**: Replace with OAuth/JWT (see CONFIGURATION.md)
+Esperanto library provides a unified interface to 8+ providers. `ModelManager` is a factory with fallback. Credentials are stored encrypted in SurrealDB (Fernet) and provisioned into env vars before model calls via `key_provider.py`.
+
+### Database Migrations
+
+`AsyncMigrationManager` runs automatically on API startup from `migrations/*.surql`. No manual steps required; check API logs for errors.
 
 ---
 
-## Important Quirks & Gotchas
+## TinkeTutor Web Shell (`apps/web/`)
 
-### API Startup
-- **Migrations run automatically** on startup; check logs for errors
-- **Must start API before UI**: UI depends on API for all data
-- **SurrealDB must be running**: API fails without database connection
+### Key Files
 
-### Frontend-Backend Communication
-- **Base API URL**: Configured in `.env.local` (default: http://localhost:5055)
-- **CORS enabled**: Configured in `api/main.py` (allow all origins in dev)
-- **Rate limiting**: Not built-in; add at proxy layer for production
+| File | Role |
+|---|---|
+| `lib/firebase.ts` | Firebase init, emulator wiring, `getCurrentIdToken()` |
+| `lib/hooks.ts` | `AuthProvider`, `useAuth`, `useRequireAuth`, `useRedirectAuthenticated` |
+| `lib/api.ts` | Typed API client (`api.sources.*`, `api.tutor.*`, `api.quiz.*`, etc.) |
+| `lib/concept-map.ts` | Shared DTO types for nodes, edges, and concept maps |
+| `lib/tutor.ts` | Tutor session/turn types, `buildTutorMessageParts()`, citation parsing |
+| `lib/workspace-focus.ts` | `WorkspaceFocus` union type, `syncWorkspaceFocusWithGraph()` |
+| `lib/i18n/index.tsx` | `I18nProvider`, `useI18n()`, `t(key)` — Danish-first, English fallback |
+| `app/workspace/[notebookId]/layout.tsx` | Core workspace shell — `WorkspaceContext`, polling, split-pane layout |
 
-### LangGraph Workflows
-- **Blocking operations**: Chat/podcast workflows may take minutes; no timeout
-- **State persistence**: Uses SQLite checkpoint storage in `/data/sqlite-db/`
-- **Model fallback**: If primary model fails, falls back to cheaper/smaller model
+### Auth Flow
 
-### Podcast Generation
-- **Async job queue**: `podcast_service.py` submits jobs but doesn't wait
-- **Track status**: Use `/commands/{command_id}` endpoint to poll status
-- **TTS failures**: Fall back to silent audio if speech synthesis fails
+`lib/firebase.ts` auto-connects to Firebase emulators when `NEXT_PUBLIC_FIREBASE_USE_EMULATORS=true`. The app throws at init if any `REQUIRED_FIREBASE_PUBLIC_ENV` var is missing.
 
-### Content Processing
-- **File extraction**: Uses content-core library; supports 50+ file types
-- **URL handling**: Extracts text + metadata from web pages
-- **Large files**: Content processing is sync; may block API briefly
+Every `apiFetch` call in `lib/api.ts` calls `getCurrentIdToken()` and attaches `Authorization: Bearer <id-token>`. Never bypass this — the FastAPI backend validates the Firebase ID token server-side.
 
----
+### i18n Rules
 
-## Component References
+- **Danish-first**: all user-visible strings must have a `da` key in `lib/i18n/da.json`
+- English (`lib/i18n/en.json`) is the fallback
+- Never hardcode UI strings — always use `t('key')` from `useI18n()`
+- The locale is persisted to `localStorage` under `tinketutor.locale`
 
-See dedicated CLAUDE.md files for detailed guidance:
+### WorkspaceContext
 
-- **[frontend/CLAUDE.md](frontend/CLAUDE.md)**: React/Next.js architecture, state management, API integration
-- **[api/CLAUDE.md](api/CLAUDE.md)**: FastAPI structure, service pattern, endpoint development
-- **[open_notebook/CLAUDE.md](open_notebook/CLAUDE.md)**: Backend core, domain models, LangGraph workflows, AI provisioning
-- **[open_notebook/domain/CLAUDE.md](open_notebook/domain/CLAUDE.md)**: Data models, repository pattern, search functions
-- **[open_notebook/ai/CLAUDE.md](open_notebook/ai/CLAUDE.md)**: ModelManager, AI provider integration, Esperanto usage
-- **[open_notebook/graphs/CLAUDE.md](open_notebook/graphs/CLAUDE.md)**: LangGraph workflow design, state machines
-- **[open_notebook/database/CLAUDE.md](open_notebook/database/CLAUDE.md)**: SurrealDB operations, migrations, async patterns
+`app/workspace/[notebookId]/layout.tsx` owns the workspace state:
+- Fetches notebook, sources, concept map on mount
+- Polls every 1.5 s when any source has status `uploaded` or `processing`
+- Renders **TutorPanel** (left, 45%) + tab-routed workspace pane (right)
+- Workspace tabs: Sources → Canvas (Knowledge Map) → Quiz → Gaps
 
----
+`WorkspaceFocus` tracks focused node, edge, or citation. Always call `syncWorkspaceFocusWithGraph` when nodes/edges change so the focus stays consistent with graph state.
 
-## Documentation Map
+### Environment Variables (apps/web/.env.local)
 
-- **[README.md](README.md)**: Project overview, features, quick start
-- **[docs/index.md](docs/index.md)**: Complete user & deployment documentation
-- **[CONFIGURATION.md](CONFIGURATION.md)**: Environment variables, model configuration
-- **[CONTRIBUTING.md](CONTRIBUTING.md)**: Contribution guidelines
-- **[MAINTAINER_GUIDE.md](MAINTAINER_GUIDE.md)**: Release & maintenance procedures
+```
+NEXT_PUBLIC_FIREBASE_API_KEY=
+NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN=
+NEXT_PUBLIC_FIREBASE_PROJECT_ID=
+NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET=
+NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID=
+NEXT_PUBLIC_FIREBASE_APP_ID=
+NEXT_PUBLIC_FIREBASE_USE_EMULATORS=true   # local dev
+NEXT_PUBLIC_API_URL=http://localhost:5055/api/v1
+```
 
----
-
-## Testing Strategy
-
-- **Unit tests**: `tests/test_domain.py`, `test_models_api.py`
-- **Graph tests**: `tests/test_graphs.py` (workflow integration)
-- **Utils tests**: `tests/test_utils.py`, `tests/test_chunking.py`, `tests/test_embedding.py`
-- **Run all**: `uv run pytest tests/`
-- **Coverage**: Check with `pytest --cov`
+In production, `NEXT_PUBLIC_API_URL` is required. In dev, it falls back to `http://localhost:5055/api/v1`.
 
 ---
 
-## Common Tasks
+## Backend Quirks
 
-### Add a New API Endpoint
-1. Create router in `api/routers/feature.py`
-2. Create service in `api/feature_service.py`
-3. Define schemas in `api/models.py`
-4. Register router in `api/main.py`
-5. Test via http://localhost:5055/docs
+- **Start order**: SurrealDB → API → frontend (API fails without database)
+- **Migrations run on every startup**: No manual migration steps; check logs
+- **PasswordAuthMiddleware is dev-only**: The API's built-in password auth is not used by `apps/web/`; `apps/web/` sends Firebase ID tokens instead
+- **LangGraph workflows are blocking**: Chat/podcast may take minutes; no timeout
+- **Podcast jobs are fire-and-forget**: Poll `/commands/{command_id}` for status
+- **CORS is open in dev**: Restrict before production
 
-### Add a New LangGraph Workflow
-1. Create `open_notebook/graphs/workflow_name.py`
-2. Define StateDict and node functions
-3. Build graph with `.add_node()` / `.add_edge()`
-4. Invoke in service: `graph.ainvoke({"input": ...}, config={"..."})`
-5. Test with sample data in `tests/`
+## Detailed Component References
 
-### Add Database Migration
-1. Create `migrations/XXX_description.surql`
-2. Write SurrealQL schema changes
-3. Create `migrations/XXX_description_down.surql` (optional rollback)
-4. API auto-detects on startup; migration runs if newer than recorded version
-
-### Deploy to Production
-1. Review [CONFIGURATION.md](CONFIGURATION.md) for security settings
-2. Use `make docker-release` for multi-platform image
-3. Push to Docker Hub / GitHub Container Registry
-4. Deploy `docker compose --profile multi up`
-5. Verify migrations via API logs
-
----
-
-## Support & Community
-
-- **Documentation**: https://open-notebook.ai
-- **Discord**: https://discord.gg/37XJPXfz2w
-- **Issues**: https://github.com/lfnovo/open-notebook/issues
-- **License**: MIT (see LICENSE)
-
+- `api/CLAUDE.md` — FastAPI structure, router/service pattern, error handling, credential management
+- `open_notebook/CLAUDE.md` — Domain models, LangGraph workflows, AI provisioning
+- `open_notebook/domain/CLAUDE.md` — SurrealDB repository pattern
+- `open_notebook/ai/CLAUDE.md` — ModelManager, Esperanto, key_provider
+- `open_notebook/graphs/CLAUDE.md` — LangGraph workflow design
+- `open_notebook/database/CLAUDE.md` — SurrealDB async patterns, migrations
+- `frontend/CLAUDE.md` — Upstream Open Notebook frontend (Zustand, TanStack Query)

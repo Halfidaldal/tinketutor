@@ -85,6 +85,40 @@ DANISH_SELF_EXPLANATION_PATTERNS = (
 )
 
 DANISH_MARKERS = {"hvad", "hvordan", "hvorfor", "hvilken", "jeg", "ikke", "med", "og", "det", "der"}
+FOLLOW_UP_REFERENCE_TOKENS = {
+    "den",
+    "det",
+    "de",
+    "dem",
+    "dette",
+    "han",
+    "he",
+    "her",
+    "him",
+    "his",
+    "hun",
+    "it",
+    "its",
+    "she",
+    "that",
+    "this",
+    "them",
+    "they",
+    "those",
+    "who",
+    "why",
+}
+GENERIC_FOLLOW_UP_QUERIES = {
+    "how so",
+    "hvad så",
+    "hvem er det",
+    "hvem er han",
+    "hvem er hun",
+    "who is he",
+    "who is she",
+    "why",
+    "why is that",
+}
 
 
 @dataclass
@@ -219,6 +253,38 @@ def _default_next_action(language: Language) -> str:
     return "Reply with your own explanation, or choose an explicit escalation for stronger help."
 
 
+def _needs_contextual_retrieval(query: str) -> bool:
+    normalized = _normalize_text(query).rstrip("?.!")
+    tokens = _tokenize(normalized)
+    if not tokens:
+        return False
+    meaningful_tokens = [token for token in tokens if len(token) > 2]
+    reference_tokens = [token for token in tokens if token in FOLLOW_UP_REFERENCE_TOKENS]
+
+    if normalized in GENERIC_FOLLOW_UP_QUERIES:
+        return True
+    if len(meaningful_tokens) <= 2 and reference_tokens:
+        return True
+    return len(meaningful_tokens) <= 1 and len(tokens) <= 5
+
+
+def _build_retrieval_query(*, session: TutorSession, query: str, is_new_session: bool) -> str:
+    if is_new_session or not _needs_contextual_retrieval(query):
+        return query
+
+    context_parts: list[str] = []
+    if session.focus_area and _normalize_text(session.focus_area) != _normalize_text(query):
+        context_parts.append(f"Focus topic: {session.focus_area}")
+    if session.last_user_message and _normalize_text(session.last_user_message) != _normalize_text(query):
+        context_parts.append(f"Previous question: {session.last_user_message}")
+
+    if not context_parts:
+        return query
+
+    context_parts.append(f"Follow-up question: {query}")
+    return "\n".join(context_parts)
+
+
 def _suggested_action(action_id: str) -> TutorSuggestedAction:
     return TutorSuggestedAction(id=action_id, kind="navigate")
 
@@ -334,12 +400,26 @@ def _build_direct_answer_text(language: Language, query: str, evidence_items: li
     return f"Direct, but still source-grounded: {' '.join(snippets)}"
 
 
+def _localize_insufficiency_reason(language: Language, reason: str | None) -> str:
+    if language != Language.DA:
+        return reason or "The notebook does not contain enough traceable evidence for this query."
+
+    normalized = _normalize_text(reason or "")
+    if "no ready sources" in normalized:
+        return "Der er endnu ingen klargjorte kilder i notesbogen."
+    if "no persisted chunks" in normalized:
+        return "Kilderne er klar, men der findes endnu ingen søgbare tekstuddrag."
+    if "citation anchors are missing" in normalized or "citation anchors are incomplete" in normalized:
+        return "Der blev fundet relevante tekstuddrag, men citatsporingen mangler stadig."
+    if "no sufficiently relevant notebook evidence was found" in normalized:
+        return "Der blev ikke fundet tilstrækkeligt relevant notebook-evidens til dette spørgsmål."
+    if "only weak evidence was found" in normalized:
+        return "Der blev kun fundet svag evidens til dette spørgsmål. Gennemgå de citerede passager, før du stoler på svaret."
+    return reason or "Notesbogen indeholder ikke nok sporbar evidens til dette spørgsmål."
+
+
 def _build_insufficient_grounding_text(language: Language, evidence_pack: EvidencePack) -> str:
-    reason = evidence_pack.insufficiency_reason or (
-        "The notebook does not contain enough traceable evidence for this query."
-        if language == Language.EN
-        else "Notesbogen indeholder ikke nok sporbar evidens til dette spørgsmål."
-    )
+    reason = _localize_insufficiency_reason(language, evidence_pack.insufficiency_reason)
     if language == Language.DA:
         return f"Jeg kan ikke give en ansvarlig, kildebaseret tutorrespons endnu. {reason}"
     return f"I cannot give a responsible, source-grounded tutoring response yet. {reason}"
@@ -777,16 +857,22 @@ class TutorService:
         )
         tutor_repository.create_turn(student_turn)
 
+        retrieval_query = _build_retrieval_query(
+            session=session,
+            query=cleaned_content,
+            is_new_session=is_new_session,
+        )
         evidence_pack = await search_service.build_evidence_pack(
             notebook_id=session.notebook_id,
             user_id=session.user_id,
-            query=cleaned_content,
+            query=retrieval_query,
             requested_source_ids=session.source_ids,
             top_k=4,
             vector_store=vector_store,
             embedding_provider=embedding_provider,
             reranker=reranker,
         )
+        evidence_pack.diagnostics["retrieval_query"] = retrieval_query
 
         draft = _build_tutor_turn_draft(
             session=session,

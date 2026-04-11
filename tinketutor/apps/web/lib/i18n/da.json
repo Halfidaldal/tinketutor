@@ -74,6 +74,8 @@
   },
   "workspace": {
     "back": "Tilbage",
+    "hideWorkspacePane": "Skjul arbejdsrum",
+    "showWorkspacePane": "Vis arbejdsrum",
     "tabs": {
       "sources": "Kilder",
       "knowledgeMap": "Videnkort",
@@ -95,6 +97,9 @@
   },
   "sourcesPage": {
     "title": "Kilder",
+    "libraryBody": "Upload kilder, følg deres status, og læs understøttende uddrag for tutorens citationer.",
+    "supportingExcerpt": "Understøttende uddrag",
+    "pagesLabel": "Sider {start}-{end}",
     "uploading": "Uploader…",
     "uploadSource": "Upload kilde",
     "addSourceDocument": "Tilføj et kildedokument",
@@ -203,6 +208,11 @@
   "tutorPanel": {
     "guidedTutor": "Guidet tutor",
     "canvasFocus": "Fokus fra videnkortet",
+    "topicLabel": "Emne",
+    "noTopic": "Intet emne valgt",
+    "progressLabel": "Fremdrift",
+    "progressValue": "{current}/{total}",
+    "suggestedActions": "Foreslåede handlinger",
     "selectionFallbackNode": "Bed tutoren om at udfolde dette begreb uden at forlade notebook-evidensen.",
     "selectionFallbackEdge": "Bed tutoren om at udfolde denne relation uden at forlade notebook-evidensen.",
     "askAboutSelection": "Spørg tutor om valget",
@@ -211,13 +221,25 @@
     "startGuidedStudy": "Start guidet studie",
     "continueGuidedStudy": "Fortsæt guidet studie",
     "needReadySource": "Upload mindst én klar kilde, før du starter en tutor-session.",
-    "showMoreHelp": "Vis mere hjælp",
+    "showMoreHelp": "Hjælp mig mere",
+    "giveMeTheAnswer": "Giv mig svaret",
     "explainDirectly": "Forklar direkte",
     "loadingHistory": "Indlæser tutorhistorik…",
     "howItWorks": "Sådan virker det",
     "howItWorksBody": "Tutoren er notebook-afgrænset. Den starter med et prompt eller hint, peger dig tilbage til citerede passager og giver kun et direkte svar efter en tydelig eskalering.",
     "nextAction": "Næste handling: {value}",
     "pagesLabel": "Sider {start}-{end}",
+    "modeLabels": {
+      "onboarding": "Onboarding",
+      "studying": "Studie",
+      "reviewing": "Gennemgang",
+      "remediating": "Afhjælpning"
+    },
+    "actionLabels": {
+      "open_sources": "Åbn kilder",
+      "open_knowledge_map": "Åbn videnkort",
+      "open_quiz": "Start quiz"
+    },
     "storedCitationDetail": "Gemt citationsdetalje",
     "loadCitation": "Indlæser citation…",
     "selectionFocusNode": "Hjælp mig med at forstå {label} kun ved hjælp af evidens fra notebooken.",

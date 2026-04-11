@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect } from 'react';
+import { useEffect, useRef, useState } from 'react';
 
 import {
   Background,
@@ -156,8 +156,10 @@ export default function CanvasView({
   generating: boolean;
 }) {
   const { t } = useI18n();
+  const rootRef = useRef<HTMLDivElement>(null);
   const [flowNodes, setFlowNodes, onNodesChange] = useNodesState<FlowConceptNode>([]);
   const [flowEdges, setFlowEdges, onEdgesChange] = useEdgesState<Edge>([]);
+  const [paneWidth, setPaneWidth] = useState(0);
 
   const uncertainNodeCount = nodes.filter((node) => node.uncertain).length;
   const uncertainEdgeCount = edges.filter((edge) => edge.uncertain).length;
@@ -168,6 +170,20 @@ export default function CanvasView({
     setFlowNodes(toFlowNodes(nodes, selection));
     setFlowEdges(toFlowEdges(edges, selection));
   }, [edges, nodes, selection, setFlowEdges, setFlowNodes]);
+
+  useEffect(() => {
+    const element = rootRef.current;
+    if (!element) {
+      return;
+    }
+
+    const observer = new ResizeObserver(([entry]) => {
+      setPaneWidth(entry.contentRect.width);
+    });
+
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, []);
 
   const handleNodeClick: NodeMouseHandler<FlowConceptNode> = (_event, node) => {
     const selectedNode = nodes.find((candidate) => candidate.id === node.id);
@@ -197,15 +213,18 @@ export default function CanvasView({
     });
   };
 
+  const showSideInspector = Boolean(selection && paneWidth >= 1040);
+
   return (
     <div
+      ref={rootRef}
       style={{
         height: '100%',
-        display: 'grid',
-        gridTemplateColumns: selection ? 'minmax(0, 1fr) minmax(280px, 34vw)' : 'minmax(0, 1fr)',
+        display: 'flex',
+        flexDirection: showSideInspector ? 'row' : 'column',
       }}
     >
-      <div style={{ minWidth: 0, display: 'flex', flexDirection: 'column' }}>
+      <div style={{ minWidth: 0, minHeight: 0, flex: 1, display: 'flex', flexDirection: 'column' }}>
         <div
           className="glass"
           style={{
@@ -314,12 +333,24 @@ export default function CanvasView({
       </div>
 
       {selection && (
-        <CanvasInspector
-          selection={selection}
-          onClose={onClearSelection}
-          onSaveNode={onSaveNode}
-          onSaveEdge={onSaveEdge}
-        />
+        <div
+          style={{
+            flex: showSideInspector ? '0 0 min(320px, 34vw)' : '0 0 auto',
+            minWidth: showSideInspector ? 300 : 0,
+            maxHeight: showSideInspector ? 'none' : '42%',
+            minHeight: 0,
+            overflow: 'auto',
+            transition: 'max-height var(--transition-fast), flex-basis var(--transition-fast)',
+          }}
+        >
+          <CanvasInspector
+            selection={selection}
+            onClose={onClearSelection}
+            onSaveNode={onSaveNode}
+            onSaveEdge={onSaveEdge}
+            stacked={!showSideInspector}
+          />
+        </div>
       )}
     </div>
   );

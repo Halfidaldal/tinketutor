@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import asyncio
 from html import unescape
+import logging
 from pathlib import Path
 import re
 import xml.etree.ElementTree as ET
@@ -20,9 +21,15 @@ from app.domain.exceptions import ProviderError
 from app.domain.models import ParsedDocument, ParsedSection
 from app.providers.parser import ParserProvider
 
+try:
+    from pypdf import PdfReader
+except ImportError:  # pragma: no cover - exercised in environments without the optional dependency
+    PdfReader = None
+
 
 WORD_NS = {"w": "http://schemas.openxmlformats.org/wordprocessingml/2006/main"}
 DRAWING_NS = {"a": "http://schemas.openxmlformats.org/drawingml/2006/main"}
+LOGGER = logging.getLogger(__name__)
 
 
 class DevelopmentParserProvider(ParserProvider):
@@ -147,6 +154,14 @@ class DevelopmentParserProvider(ParserProvider):
         )
 
     def _parse_pdf(self, path: Path) -> ParsedDocument:
+        if PdfReader is not None:
+            try:
+                parsed_document = self._parse_pdf_with_pypdf(path)
+                if parsed_document.raw_text.strip():
+                    return parsed_document
+            except Exception as exc:  # pragma: no cover - fallback path depends on malformed PDFs
+                LOGGER.warning("PyPDF extraction failed for %s; falling back to stream parsing: %s", path, exc)
+
         try:
             pdf_bytes = path.read_bytes()
         except Exception as exc:
@@ -190,6 +205,44 @@ class DevelopmentParserProvider(ParserProvider):
             metadata={"parser_type": "pdf_stream_fallback"},
         )
 
+    def _parse_pdf_with_pypdf(self, path: Path) -> ParsedDocument:
+        reader = PdfReader(str(path))
+        sections: list[ParsedSection] = []
+        page_texts: list[str] = []
+
+        for page_index, page in enumerate(reader.pages, start=1):
+            extracted_text = self._normalize_pdf_text(page.extract_text() or "")
+            if not extracted_text:
+                continue
+
+            page_lines = [line.strip() for line in extracted_text.splitlines() if line.strip()]
+            page_title = page_lines[0][:120] if page_lines else None
+            sections.append(
+                ParsedSection(
+                    title=page_title,
+                    content=extracted_text,
+                    page_start=page_index,
+                    page_end=page_index,
+                    level=1,
+                )
+            )
+            page_texts.append(extracted_text)
+
+        raw_text = "\n\n".join(page_texts).strip()
+        if not raw_text:
+            raise ProviderError("parser", "No readable text found in PDF document")
+
+        metadata = reader.metadata or {}
+        document_title = (getattr(metadata, "title", None) or path.stem).strip() or path.stem
+
+        return ParsedDocument(
+            title=document_title,
+            sections=sections,
+            raw_text=raw_text,
+            page_count=len(reader.pages) or 1,
+            metadata={"parser_type": "pypdf"},
+        )
+
     def _extract_pdf_text(self, decoded_stream: str) -> list[str]:
         results: list[str] = []
 
@@ -215,3 +268,10 @@ class DevelopmentParserProvider(ParserProvider):
         value = value.replace(r"\(", "(").replace(r"\)", ")").replace(r"\\", "\\")
         value = value.replace(r"\n", "\n").replace(r"\r", "\r").replace(r"\t", "\t")
         return re.sub(r"\\([0-7]{1,3})", lambda match: chr(int(match.group(1), 8)), value)
+
+    def _normalize_pdf_text(self, value: str) -> str:
+        value = value.replace("\x00", "")
+        value = value.replace("\r\n", "\n").replace("\r", "\n")
+        value = re.sub(r"[ \t]+\n", "\n", value)
+        value = re.sub(r"\n{3,}", "\n\n", value)
+        return value.strip()

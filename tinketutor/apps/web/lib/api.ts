@@ -11,7 +11,7 @@ import { getCurrentIdToken } from './firebase';
 
 export const REQUIRED_API_PUBLIC_ENV = ['NEXT_PUBLIC_API_URL'] as const;
 
-const LOCAL_API_BASE = 'http://localhost:8000/api/v1';
+const LOCAL_API_BASE = 'http://localhost:5055/api/v1';
 
 function resolveApiBase(): string {
   const configuredBase = process.env.NEXT_PUBLIC_API_URL?.trim();

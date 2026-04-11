@@ -48,7 +48,7 @@ class Settings(BaseSettings):
     # Google Vertex AI / Gemini
     google_cloud_project: str = ""
     google_cloud_location: str = "europe-west1"
-    gemini_model: str = "gemini-1.5-pro"
+    gemini_model: str = "gemini-2.5-flash"
     embedding_model: str = "text-embedding-004"
     vertex_model_tutor: str = ""
     vertex_model_structured: str = ""
@@ -72,7 +72,7 @@ class Settings(BaseSettings):
     lexical_search_min_score: float = 0.15
     search_partial_support_threshold: float = 0.45
     search_strong_support_threshold: float = 0.7
-    retrieval_enable_vector: bool = False
+    retrieval_enable_vector: bool = True
 
     # --- Canvas ---
     canvas_node_target: int = 12

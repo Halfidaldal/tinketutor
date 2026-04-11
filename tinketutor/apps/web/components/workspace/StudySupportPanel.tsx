@@ -118,7 +118,13 @@ export function StudySupportPanel({
         {mode === 'evidence' ? (
           <EvidencePanel notebookId={notebookId} sources={sources} selection={selection} />
         ) : (
-          <TutorPanel notebookId={notebookId} sources={sources} selection={selection} />
+          <TutorPanel
+            notebookId={notebookId}
+            sources={sources}
+            focus={selection}
+            onFocusChange={() => {}}
+            onWorkspacePaneOpenChange={() => {}}
+          />
         )}
       </div>
     </div>

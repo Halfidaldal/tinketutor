@@ -141,6 +141,22 @@ def _tokenize_words(value: str) -> list[str]:
     return WORD_RE.findall(value)
 
 
+def _looks_garbled_text(value: str) -> bool:
+    tokens = [token for token in _tokenize_words(value) if any(char.isalpha() for char in token)]
+    if not tokens:
+        return True
+    if len(tokens) == 1 and tokens[0].isupper():
+        return False
+
+    single_char_tokens = sum(1 for token in tokens if len(token) == 1)
+    short_tokens = sum(1 for token in tokens if len(token) <= 2)
+    longest_token = max(len(token) for token in tokens)
+
+    if single_char_tokens >= 2 and longest_token <= 3:
+        return True
+    return (single_char_tokens / len(tokens)) > 0.45 or (short_tokens / len(tokens)) > 0.75
+
+
 def _clean_phrase(words: list[str]) -> str | None:
     if not words:
         return None
@@ -158,6 +174,8 @@ def _clean_phrase(words: list[str]) -> str | None:
         if len(token) < 3 and not token.isupper():
             return None
     if len(normalized) < 3:
+        return None
+    if _looks_garbled_text(phrase):
         return None
     return phrase
 
@@ -305,6 +323,8 @@ def _build_summary(label: str, evidence_items: list[ConceptEvidenceReference]) -
     if not evidence_items:
         return label
     snippet = evidence_items[0].snippet_text.strip().replace("\n", " ")
+    if _looks_garbled_text(snippet):
+        return label
     if len(snippet) > 180:
         snippet = f"{snippet[:177].rstrip()}..."
     return snippet or label

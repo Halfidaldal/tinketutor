@@ -74,6 +74,8 @@
   },
   "workspace": {
     "back": "Back",
+    "hideWorkspacePane": "Hide workspace",
+    "showWorkspacePane": "Show workspace",
     "tabs": {
       "sources": "Sources",
       "knowledgeMap": "Knowledge Map",
@@ -95,6 +97,9 @@
   },
   "sourcesPage": {
     "title": "Sources",
+    "libraryBody": "Upload sources, review readiness, and inspect supporting excerpts for tutor citations.",
+    "supportingExcerpt": "Supporting Excerpt",
+    "pagesLabel": "Pages {start}-{end}",
     "uploading": "Uploading…",
     "uploadSource": "Upload Source",
     "addSourceDocument": "Add a source document",
@@ -203,6 +208,11 @@
   "tutorPanel": {
     "guidedTutor": "Guided Tutor",
     "canvasFocus": "Knowledge Map Focus",
+    "topicLabel": "Topic",
+    "noTopic": "No topic selected",
+    "progressLabel": "Progress",
+    "progressValue": "{current}/{total}",
+    "suggestedActions": "Suggested actions",
     "selectionFallbackNode": "Ask the tutor to unpack this concept without leaving notebook evidence.",
     "selectionFallbackEdge": "Ask the tutor to unpack this relationship without leaving notebook evidence.",
     "askAboutSelection": "Ask Tutor About Selection",
@@ -211,13 +221,25 @@
     "startGuidedStudy": "Start Guided Study",
     "continueGuidedStudy": "Continue Guided Study",
     "needReadySource": "Upload at least one ready source before starting a tutor session.",
-    "showMoreHelp": "Show More Help",
+    "showMoreHelp": "Show more help",
+    "giveMeTheAnswer": "Give me the answer",
     "explainDirectly": "Explain Directly",
     "loadingHistory": "Loading tutor history…",
     "howItWorks": "How this works",
     "howItWorksBody": "The tutor is notebook-scoped. It starts with a prompt or hint, points you back to cited passages, and only gives a direct answer after explicit escalation.",
     "nextAction": "Next action: {value}",
     "pagesLabel": "Pages {start}-{end}",
+    "modeLabels": {
+      "onboarding": "Onboarding",
+      "studying": "Studying",
+      "reviewing": "Reviewing",
+      "remediating": "Remediating"
+    },
+    "actionLabels": {
+      "open_sources": "Open sources",
+      "open_knowledge_map": "Open knowledge map",
+      "open_quiz": "Start quiz"
+    },
     "storedCitationDetail": "Stored Citation Detail",
     "loadCitation": "Loading citation…",
     "selectionFocusNode": "Help me understand {label} using only notebook evidence.",

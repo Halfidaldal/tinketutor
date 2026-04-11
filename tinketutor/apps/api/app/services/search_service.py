@@ -11,7 +11,7 @@ from google.api_core.exceptions import FailedPrecondition
 from app.config import settings
 from app.domain.enums import EvidenceSupport, RetrievalMode, SupportAssessment
 from app.domain.exceptions import NotFoundError, ProviderError, ValidationError
-from app.domain.models import EvidenceChunk, EvidencePack, ScoredChunk
+from app.domain.models import ChunkWithEmbedding, EvidenceChunk, EvidencePack, ScoredChunk
 from app.infra.store import new_id, utc_now
 from app.providers.embedding import EmbeddingProvider
 from app.providers.reranker import Reranker
@@ -200,6 +200,44 @@ def _fuse_results(
     ], RetrievalMode.LEXICAL
 
 
+async def _backfill_chunk_embeddings(
+    *,
+    chunks: list,
+    embedding_provider: EmbeddingProvider,
+    vector_store: VectorStore,
+) -> int:
+    pending_chunks = [
+        chunk
+        for chunk in chunks
+        if not chunk.embedding and chunk.content.strip()
+    ]
+    if not pending_chunks:
+        return 0
+
+    embeddings = await embedding_provider.embed([chunk.content for chunk in pending_chunks])
+    if len(embeddings) != len(pending_chunks):
+        return 0
+
+    chunks_with_embeddings: list[ChunkWithEmbedding] = []
+    for chunk, embedding in zip(pending_chunks, embeddings, strict=False):
+        if not embedding:
+            continue
+        chunk.embedding = embedding
+        chunks_with_embeddings.append(
+            ChunkWithEmbedding(
+                chunk_id=chunk.id,
+                source_id=chunk.source_id,
+                embedding=embedding,
+            )
+        )
+
+    if not chunks_with_embeddings:
+        return 0
+
+    await vector_store.store_embeddings(chunks_with_embeddings)
+    return len(chunks_with_embeddings)
+
+
 async def get_retrieval_readiness(notebook_id: str, user_id: str) -> dict:
     notebook = notebook_service.get_notebook(notebook_id, user_id)
     if not notebook:
@@ -316,6 +354,13 @@ async def build_evidence_pack(
     )
 
     vector_results: list[ScoredChunk] = []
+    backfilled_embedding_count = 0
+    if settings.retrieval_enable_vector:
+        backfilled_embedding_count = await _backfill_chunk_embeddings(
+            chunks=chunks,
+            embedding_provider=embedding_provider,
+            vector_store=vector_store,
+        )
     if settings.retrieval_enable_vector and any(chunk.embedding for chunk in chunks):
         query_embeddings = await embedding_provider.embed([normalized_query])
         if query_embeddings:
@@ -384,6 +429,8 @@ async def build_evidence_pack(
     evidence_pack.diagnostics = {
         "ready_source_count": len(ready_sources),
         "chunk_count": len(chunks),
+        "embedded_chunk_count": sum(1 for chunk in chunks if chunk.embedding),
+        "backfilled_embedding_count": backfilled_embedding_count,
         "lexical_candidate_count": len(lexical_results),
         "vector_candidate_count": len(vector_results),
         "excluded_untraceable": missing_traceability,
@@ -410,6 +457,6 @@ async def build_evidence_pack(
         return evidence_pack
 
     evidence_pack.support_assessment = SupportAssessment.WEAK_EVIDENCE
-    evidence_pack.insufficient_grounding = True
+    evidence_pack.insufficient_grounding = False
     evidence_pack.insufficiency_reason = "Only weak evidence was found for this query. Review the cited passages before relying on the result."
     return evidence_pack
