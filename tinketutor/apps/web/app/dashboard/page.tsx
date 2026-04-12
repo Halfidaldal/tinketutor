@@ -123,6 +123,20 @@ export default function DashboardPage() {
         </div>
 
         <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+          <Link
+            href="/study"
+            style={{
+              padding: '0.4rem 0.7rem',
+              borderRadius: 'var(--radius-md)',
+              border: '1px solid var(--color-border-secondary)',
+              background: 'transparent',
+              color: 'var(--color-text-secondary)',
+              fontSize: '0.75rem',
+              textDecoration: 'none',
+            }}
+          >
+            {t('dashboard.backToStudyHome')}
+          </Link>
           <span style={{ fontSize: '0.8125rem', color: 'var(--color-text-tertiary)' }}>
             {user.displayName || user.email}
           </span>

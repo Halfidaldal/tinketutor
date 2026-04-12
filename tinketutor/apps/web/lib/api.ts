@@ -30,6 +30,26 @@ function resolveApiBase(): string {
 
 const API_BASE = resolveApiBase();
 
+export interface TutorLocaleOptions {
+  /** Locale driving the application UI (`t()` lookups, formatting). */
+  uiLocale?: string;
+  /** Locale the tutor should respond in. Defaults to `uiLocale` on the server. */
+  responseLocale?: string;
+  /** Legacy single-locale field; forwarded for backward compatibility. */
+  locale?: string;
+}
+
+function serializeLocales(locales?: TutorLocaleOptions): Record<string, string> {
+  if (!locales) {
+    return {};
+  }
+  const payload: Record<string, string> = {};
+  if (locales.locale) payload.locale = locales.locale;
+  if (locales.uiLocale) payload.uiLocale = locales.uiLocale;
+  if (locales.responseLocale) payload.responseLocale = locales.responseLocale;
+  return payload;
+}
+
 export interface QuizItemDTO {
   id: string;
   notebook_id: string;
@@ -235,6 +255,22 @@ export const api = {
         body: JSON.stringify({ title, description }),
       }),
 
+    bootstrap: (locales?: TutorLocaleOptions) =>
+      apiFetch<{
+        notebook: {
+          id: string;
+          title: string;
+          description: string;
+          source_ids?: string[];
+          created_at?: string;
+          updated_at?: string;
+        };
+        created: boolean;
+      }>(`/notebooks/bootstrap`, {
+        method: 'POST',
+        body: JSON.stringify(serializeLocales(locales)),
+      }),
+
     list: () => apiFetch('/notebooks'),
 
     get: (notebookId: string) =>
@@ -322,11 +358,24 @@ export const api = {
       query?: string;
       focusArea?: string;
       sourceIds?: string[];
-      locale?: string;
-    }) =>
-      apiFetch(`/notebooks/${notebookId}/tutor/sessions`, {
+      intent?: string;
+    } & TutorLocaleOptions) => {
+      const { query, focusArea, sourceIds, intent, ...locales } = payload;
+      const body: Record<string, unknown> = { ...serializeLocales(locales) };
+      if (query !== undefined) body.query = query;
+      if (focusArea !== undefined) body.focusArea = focusArea;
+      if (sourceIds !== undefined) body.sourceIds = sourceIds;
+      if (intent !== undefined) body.intent = intent;
+      return apiFetch(`/notebooks/${notebookId}/tutor/sessions`, {
         method: 'POST',
-        body: JSON.stringify(payload),
+        body: JSON.stringify(body),
+      });
+    },
+
+    bootstrapSession: (notebookId: string, locales?: TutorLocaleOptions) =>
+      apiFetch(`/notebooks/${notebookId}/tutor/sessions/bootstrap`, {
+        method: 'POST',
+        body: JSON.stringify(serializeLocales(locales)),
       }),
 
     listSessions: (notebookId: string, limit = 5, status?: string) =>
@@ -345,27 +394,38 @@ export const api = {
         params: { limit: String(limit) },
       }),
 
-    sendTurn: (notebookId: string, sessionId: string, content: string, locale?: string) =>
+    sendTurn: (
+      notebookId: string,
+      sessionId: string,
+      content: string,
+      locales?: TutorLocaleOptions,
+    ) =>
       apiFetch(`/notebooks/${notebookId}/tutor/sessions/${sessionId}/turns`, {
         method: 'POST',
-        body: JSON.stringify({ content, locale }),
+        body: JSON.stringify({ content, ...serializeLocales(locales) }),
       }),
 
-    sendMessage: (notebookId: string, sessionId: string, content: string, locale?: string) =>
+    sendMessage: (
+      notebookId: string,
+      sessionId: string,
+      content: string,
+      locales?: TutorLocaleOptions,
+    ) =>
       apiFetch(`/notebooks/${notebookId}/tutor/sessions/${sessionId}/messages`, {
         method: 'POST',
-        body: JSON.stringify({ content, locale }),
+        body: JSON.stringify({ content, ...serializeLocales(locales) }),
       }),
 
     escalate: (notebookId: string, sessionId: string, payload: {
       action: 'show_more_help' | 'give_me_the_answer' | 'explain_directly';
       content?: string;
-      locale?: string;
-    }) =>
-      apiFetch(`/notebooks/${notebookId}/tutor/sessions/${sessionId}/escalate`, {
+    } & TutorLocaleOptions) => {
+      const { action, content, ...locales } = payload;
+      return apiFetch(`/notebooks/${notebookId}/tutor/sessions/${sessionId}/escalate`, {
         method: 'POST',
-        body: JSON.stringify(payload),
-      }),
+        body: JSON.stringify({ action, content, ...serializeLocales(locales) }),
+      });
+    },
   },
 
   // --- Quiz (ActiveLearning) ---

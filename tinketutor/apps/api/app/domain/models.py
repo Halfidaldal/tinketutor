@@ -359,7 +359,12 @@ class TutorEvidenceReference(BaseModel):
 
 
 class TutorSuggestedAction(BaseModel):
-    id: Literal["open_sources", "open_knowledge_map", "open_quiz"]
+    id: Literal[
+        "open_sources",
+        "open_knowledge_map",
+        "open_quiz",
+        "upload_sources",
+    ]
     kind: Literal["navigate"] = "navigate"
 
 

@@ -7,6 +7,7 @@ from app.config import settings
 from app.domain.enums import (
     CitationOutputType,
     Language,
+    SourceStatus,
     SupportAssessment,
     TutorEscalationAction,
     TutorMessageRole,
@@ -29,7 +30,7 @@ from app.infra.store import new_id, utc_now
 from app.providers.embedding import EmbeddingProvider
 from app.providers.reranker import Reranker
 from app.providers.vector_store import VectorStore
-from app.repositories import tutor_repository
+from app.repositories import source_ingestion_repository, tutor_repository
 from app.services import citation_service, notebook_service, search_service
 
 
@@ -83,6 +84,61 @@ DANISH_SELF_EXPLANATION_PATTERNS = (
     "det betyder",
     "fordi",
 )
+
+ONBOARDING_GREETINGS_DA: dict[str, str] = {
+    "empty": (
+        "Hej! Jeg er din TinkeTutor. Jeg holder alt, jeg siger, forankret i dine egne "
+        "materialer. Upload en PDF, et slide deck eller et dokument, så guider jeg dig "
+        "igennem det sammen med dig."
+    ),
+    "processing": (
+        "Hej igen! Jeg er ved at indeksere dine materialer nu. Så snart de er klar, "
+        "kan jeg stille dig gode spørgsmål og pege på de præcise steder i kilderne."
+    ),
+    "partial": (
+        "Hej! Nogle af dine materialer er klar, og andre er stadig under behandling. "
+        "Vi kan roligt begynde på det, der allerede er indekseret."
+    ),
+    "ready": (
+        "Hej! Dine materialer er klar. Sig til, hvad du vil forstå, eller vælg et "
+        "oplæg herunder, så starter vi der."
+    ),
+}
+
+ONBOARDING_GREETINGS_EN: dict[str, str] = {
+    "empty": (
+        "Hi! I'm your TinkeTutor. I keep every answer grounded in your own study "
+        "materials. Upload a PDF, slide deck, or document and I'll walk through it "
+        "with you."
+    ),
+    "processing": (
+        "Welcome back. I'm indexing your materials right now. As soon as they're "
+        "ready I'll be able to ask the right questions and point at the exact "
+        "passages."
+    ),
+    "partial": (
+        "Hi! Some of your materials are ready while others are still processing. "
+        "We can safely begin with the parts that are already indexed."
+    ),
+    "ready": (
+        "Hi! Your materials are ready. Tell me what you want to understand, or pick "
+        "one of the prompts below and we'll start there."
+    ),
+}
+
+ONBOARDING_NEXT_ACTIONS_DA: dict[str, str] = {
+    "empty": "Upload dit første studiemateriale, så kan vi starte.",
+    "processing": "Jeg siger til, så snart dine materialer er klar.",
+    "partial": "Vælg et klart materiale, eller spørg mig om det, der allerede er indekseret.",
+    "ready": "Fortæl, hvad du vil forstå — eller bed mig om at opsummere et af materialerne.",
+}
+
+ONBOARDING_NEXT_ACTIONS_EN: dict[str, str] = {
+    "empty": "Upload your first study material so we can begin.",
+    "processing": "I'll let you know the moment your materials finish indexing.",
+    "partial": "Pick a ready material, or ask me about what's already indexed.",
+    "ready": "Tell me what you want to understand — or ask me to summarize one of the materials.",
+}
 
 DANISH_MARKERS = {"hvad", "hvordan", "hvorfor", "hvilken", "jeg", "ikke", "med", "og", "det", "der"}
 FOLLOW_UP_REFERENCE_TOKENS = {
@@ -170,11 +226,20 @@ def _resolve_language(
     *,
     query: str | None = None,
     current_language: Language | None = None,
+    response_locale: str | None = None,
 ) -> Language:
-    normalized_locale = (locale or "").strip().lower()
+    """Resolve the output language for a tutor exchange.
+
+    Precedence: explicit response_locale → legacy locale → existing session language
+    → language detected from the user message → configured default.
+    """
     supported_locales = set(settings.supported_locales)
-    if normalized_locale and normalized_locale in supported_locales:
-        return Language(normalized_locale)
+
+    for candidate in (response_locale, locale):
+        normalized = (candidate or "").strip().lower()
+        if normalized and normalized in supported_locales:
+            return Language(normalized)
+
     if current_language and current_language != Language.UNKNOWN:
         return current_language
     if query:
@@ -287,6 +352,106 @@ def _build_retrieval_query(*, session: TutorSession, query: str, is_new_session:
 
 def _suggested_action(action_id: str) -> TutorSuggestedAction:
     return TutorSuggestedAction(id=action_id, kind="navigate")
+
+
+def _compute_source_availability_state(sources: list) -> str:
+    """Classify the learner's source library for onboarding.
+
+    Returns one of: "empty", "processing", "partial", "ready".
+    """
+    if not sources:
+        return "empty"
+    ready = [s for s in sources if s.status == SourceStatus.READY]
+    pending = [s for s in sources if s.status in {SourceStatus.UPLOADED, SourceStatus.PROCESSING}]
+    if ready and not pending:
+        return "ready"
+    if ready and pending:
+        return "partial"
+    if pending:
+        return "processing"
+    # All failed or otherwise not ready — treat as empty so the tutor steers to upload.
+    return "empty"
+
+
+def _build_onboarding_content(
+    *,
+    language: Language,
+    state: str,
+    ready_source_titles: list[str],
+) -> str:
+    templates = ONBOARDING_GREETINGS_DA if language == Language.DA else ONBOARDING_GREETINGS_EN
+    base = templates.get(state, templates["empty"])
+    if state == "partial" and ready_source_titles:
+        preview = ", ".join(ready_source_titles[:3])
+        if language == Language.DA:
+            base = f"{base} De klare materialer lige nu: {preview}."
+        else:
+            base = f"{base} Ready right now: {preview}."
+    if state == "ready" and ready_source_titles:
+        first = ready_source_titles[0]
+        if language == Language.DA:
+            base = f"{base} Jeg kan fx starte med at opsummere hovedideerne i \"{first}\"."
+        else:
+            base = f"{base} For example, I can start by summarizing the main ideas of \"{first}\"."
+    return base
+
+
+def _build_onboarding_suggested_actions(state: str) -> list[TutorSuggestedAction]:
+    if state == "empty":
+        return [_suggested_action("upload_sources")]
+    if state == "processing":
+        return [_suggested_action("open_sources")]
+    if state == "partial":
+        return [_suggested_action("open_sources"), _suggested_action("open_knowledge_map")]
+    # ready
+    return [
+        _suggested_action("open_knowledge_map"),
+        _suggested_action("open_quiz"),
+    ]
+
+
+def _build_onboarding_turn_draft(
+    *,
+    language: Language,
+    sources: list,
+) -> TutorTurnDraft:
+    state = _compute_source_availability_state(sources)
+    ready_source_titles = [
+        s.title for s in sources if s.status == SourceStatus.READY and s.title
+    ]
+    content = _build_onboarding_content(
+        language=language,
+        state=state,
+        ready_source_titles=ready_source_titles,
+    )
+    suggested_actions = _build_onboarding_suggested_actions(state)
+    next_action_lookup = (
+        ONBOARDING_NEXT_ACTIONS_DA if language == Language.DA else ONBOARDING_NEXT_ACTIONS_EN
+    )
+    suggested_next_action = next_action_lookup.get(state)
+
+    if state in {"empty", "processing"}:
+        support_assessment = SupportAssessment.NO_READY_SOURCES
+    else:
+        support_assessment = None
+
+    return TutorTurnDraft(
+        current_mode=TutorMode.ONBOARDING,
+        tutor_state=TutorState.CLARIFY_GOAL,
+        message_type=TutorMessageType.QUESTION,
+        content=content,
+        user_intent=TutorUserIntent.CLARIFY_REQUEST,
+        evidence_items=[],  # grounding guard: never synthesize evidence for onboarding
+        escalation_available=False,
+        follow_up_required=True,
+        suggested_next_action=suggested_next_action,
+        suggested_actions=suggested_actions,
+        support_assessment=support_assessment,
+        insufficient_grounding=False,
+        insufficiency_reason=None,
+        language=language,
+        next_hint_level=0,
+    )
 
 
 def _determine_tutor_mode(
@@ -679,13 +844,20 @@ class TutorService:
         query: str,
         source_ids: list[str],
         locale: str | None,
+        ui_locale: str | None = None,
+        response_locale: str | None = None,
+        intent: str | None = None,
         vector_store: VectorStore,
         embedding_provider: EmbeddingProvider,
         reranker: Reranker,
     ) -> tuple[TutorSession, TutorTurn]:
         cleaned_query = query.strip()
-        if not cleaned_query:
+        onboarding_intent = (intent or "").strip().lower() == "onboarding"
+        is_onboarding_start = onboarding_intent or not cleaned_query
+
+        if not is_onboarding_start and not cleaned_query:
             raise ValidationError("Tutor query is required")
+
         notebook = notebook_service.get_notebook(notebook_id, user_id)
         if not notebook:
             raise NotFoundError("Notebook", notebook_id)
@@ -693,7 +865,11 @@ class TutorService:
         if invalid_source_ids:
             raise ValidationError(f"Source IDs are outside this notebook: {', '.join(invalid_source_ids)}")
 
-        language = _resolve_language(locale, query=cleaned_query)
+        language = _resolve_language(
+            locale,
+            query=cleaned_query or None,
+            response_locale=response_locale,
+        )
         now = utc_now()
         session = TutorSession(
             id=new_id(),
@@ -707,11 +883,17 @@ class TutorService:
             message_count=0,
             hint_level=0,
             language=language,
-            last_user_message=cleaned_query,
+            last_user_message=cleaned_query or None,
             created_at=now,
             updated_at=now,
         )
         tutor_repository.create_session(session)
+
+        if is_onboarding_start:
+            return await self._record_onboarding_turn(
+                session=session,
+                language=language,
+            )
 
         return await self._record_exchange(
             session=session,
@@ -724,6 +906,61 @@ class TutorService:
             is_new_session=True,
         )
 
+    async def bootstrap_session(
+        self,
+        *,
+        notebook_id: str,
+        user_id: str,
+        locale: str | None,
+        ui_locale: str | None = None,
+        response_locale: str | None = None,
+        vector_store: VectorStore,
+        embedding_provider: EmbeddingProvider,
+        reranker: Reranker,
+    ) -> tuple[TutorSession, TutorTurn]:
+        """Return the learner's active onboarding session, creating one if needed.
+
+        The Study Home shell (and the workspace TutorPanel on first mount) calls
+        this instead of start_session so refreshing the page doesn't pile up
+        duplicate onboarding turns.
+        """
+        notebook = notebook_service.get_notebook(notebook_id, user_id)
+        if not notebook:
+            raise NotFoundError("Notebook", notebook_id)
+
+        existing_sessions = tutor_repository.list_sessions_for_notebook(
+            notebook_id,
+            user_id,
+            limit=1,
+            status=TutorSessionStatus.ACTIVE,
+        )
+        if existing_sessions:
+            session = existing_sessions[0]
+            turns = tutor_repository.list_turns_for_session(session.id, limit=1)
+            if turns:
+                return session, turns[-1]
+            # Session exists but has no turns — emit the onboarding turn now.
+            language = _resolve_language(
+                locale,
+                response_locale=response_locale,
+                current_language=session.language,
+            )
+            return await self._record_onboarding_turn(session=session, language=language)
+
+        return await self.start_session(
+            notebook_id=notebook_id,
+            user_id=user_id,
+            query="",
+            source_ids=[],
+            locale=locale,
+            ui_locale=ui_locale,
+            response_locale=response_locale,
+            intent="onboarding",
+            vector_store=vector_store,
+            embedding_provider=embedding_provider,
+            reranker=reranker,
+        )
+
     async def continue_session(
         self,
         *,
@@ -732,6 +969,7 @@ class TutorService:
         user_id: str,
         content: str,
         locale: str | None,
+        response_locale: str | None = None,
         vector_store: VectorStore,
         embedding_provider: EmbeddingProvider,
         reranker: Reranker,
@@ -739,7 +977,12 @@ class TutorService:
         session = self.get_session(notebook_id=notebook_id, session_id=session_id, user_id=user_id)
         if session.status != TutorSessionStatus.ACTIVE:
             raise ValidationError("Tutor session is no longer active")
-        language = _resolve_language(locale, query=content, current_language=session.language)
+        language = _resolve_language(
+            locale,
+            query=content,
+            current_language=session.language,
+            response_locale=response_locale,
+        )
         return await self._record_exchange(
             session=session,
             content=content,
@@ -760,6 +1003,7 @@ class TutorService:
         action: TutorEscalationAction,
         content: str | None,
         locale: str | None,
+        response_locale: str | None = None,
         vector_store: VectorStore,
         embedding_provider: EmbeddingProvider,
         reranker: Reranker,
@@ -770,7 +1014,12 @@ class TutorService:
         escalated_content = (content or session.last_user_message or session.focus_area).strip()
         if not escalated_content:
             raise ValidationError("A tutor session needs a question to escalate")
-        language = _resolve_language(locale, query=escalated_content, current_language=session.language)
+        language = _resolve_language(
+            locale,
+            query=escalated_content,
+            current_language=session.language,
+            response_locale=response_locale,
+        )
 
         return await self._record_exchange(
             session=session,
@@ -807,6 +1056,56 @@ class TutorService:
     def list_turns(self, *, notebook_id: str, session_id: str, user_id: str, limit: int | None = None) -> list[TutorTurn]:
         self.get_session(notebook_id=notebook_id, session_id=session_id, user_id=user_id)
         return tutor_repository.list_turns_for_session(session_id, limit=limit)
+
+    async def _record_onboarding_turn(
+        self,
+        *,
+        session: TutorSession,
+        language: Language,
+    ) -> tuple[TutorSession, TutorTurn]:
+        """Persist a proactive, source-aware onboarding turn.
+
+        Unlike `_record_exchange`, this path skips retrieval and the IDLE→hint
+        ladder. It exists so the Study Home shell can deliver a grounded
+        greeting the moment a learner lands, without falling back to generic
+        LLM chat when no sources are available.
+        """
+        sources = source_ingestion_repository.list_sources(session.notebook_id, session.user_id)
+        draft = _build_onboarding_turn_draft(language=language, sources=sources)
+
+        tutor_turn = TutorTurn(
+            id=new_id(),
+            session_id=session.id,
+            notebook_id=session.notebook_id,
+            role=TutorMessageRole.TUTOR,
+            content=draft.content,
+            tutor_state=draft.tutor_state,
+            message_type=draft.message_type,
+            user_intent=draft.user_intent,
+            escalation_action=None,
+            citation_ids=[],
+            evidence_pack_id=None,
+            evidence_items=[],
+            escalation_available=draft.escalation_available,
+            follow_up_required=draft.follow_up_required,
+            suggested_next_action=draft.suggested_next_action,
+            suggested_actions=draft.suggested_actions,
+            support_assessment=draft.support_assessment,
+            insufficient_grounding=False,
+            insufficiency_reason=None,
+            language=draft.language,
+            created_at=utc_now(),
+        )
+        tutor_repository.create_turn(tutor_turn)
+
+        session.current_mode = draft.current_mode
+        session.current_state = draft.tutor_state
+        session.hint_level = draft.next_hint_level
+        session.language = draft.language
+        session.updated_at = utc_now()
+        tutor_repository.update_session(session)
+
+        return session, tutor_turn
 
     async def _record_exchange(
         self,

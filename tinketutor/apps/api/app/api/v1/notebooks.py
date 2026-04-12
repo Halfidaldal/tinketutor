@@ -26,6 +26,16 @@ class UpdateNotebookRequest(BaseModel):
     description: str | None = None
 
 
+class BootstrapNotebookRequest(BaseModel):
+    ui_locale: str | None = None
+    response_locale: str | None = None
+
+    model_config = {"populate_by_name": True, "extra": "ignore"}
+
+    def preferred_locale(self) -> str:
+        return ((self.response_locale or self.ui_locale) or "da").strip().lower()
+
+
 @router.post("", status_code=status.HTTP_201_CREATED)
 async def create_notebook(
     request: CreateNotebookRequest,
@@ -50,6 +60,37 @@ async def list_notebooks(
     user: AuthenticatedUser = Depends(get_current_user),
 ):
     return {"notebooks": notebook_service.list_notebooks(user.user_id)}
+
+
+@router.post("/bootstrap")
+async def bootstrap_notebook(
+    request: BootstrapNotebookRequest | None = None,
+    user: AuthenticatedUser = Depends(get_current_user),
+):
+    """Return the learner's active study space, creating a default one on first run.
+
+    Called by the Study Home shell on every mount so a signed-in user always has
+    exactly one study space to land in. Idempotent: if notebooks already exist,
+    the most recently updated one is returned unchanged.
+    """
+    existing = notebook_service.list_notebooks(user.user_id)
+    if existing:
+        return {"notebook": existing[0], "created": False}
+
+    locale = (request.preferred_locale() if request else "da")
+    if locale == "da":
+        default_title = "Din studieplads"
+        default_description = "Din personlige studieplads i TinkeTutor."
+    else:
+        default_title = "Your study space"
+        default_description = "Your personal TinkeTutor study space."
+
+    notebook = notebook_service.create_notebook(
+        user_id=user.user_id,
+        title=default_title,
+        description=default_description,
+    )
+    return {"notebook": notebook, "created": True}
 
 
 @router.get("/{notebook_id}")

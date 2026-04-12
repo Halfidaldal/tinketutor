@@ -10,8 +10,8 @@ function LoginPageContent() {
   const { t } = useI18n();
   const router = useRouter();
   const searchParams = useSearchParams();
-  const nextPath = useMemo(() => searchParams.get('next') || '/dashboard', [searchParams]);
-  const { loading: redirectLoading } = useRedirectAuthenticated('/dashboard');
+  const nextPath = useMemo(() => searchParams.get('next') || '/study', [searchParams]);
+  const { loading: redirectLoading } = useRedirectAuthenticated('/study');
   const { authenticateWithEmail, clearError, error, signInWithGoogle } = useAuth();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');

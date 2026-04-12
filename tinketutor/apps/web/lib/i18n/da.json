@@ -70,7 +70,8 @@
     "firstNotebookBody": "Upload dit studiemateriale, og gør det til et interaktivt læringsrum med videnkort, quizzer og sokratisk tutoring.",
     "sourcesCountOne": "📄 1 kilde",
     "sourcesCountMany": "📄 {count} kilder",
-    "notebookFallback": "Notesbog"
+    "notebookFallback": "Notesbog",
+    "backToStudyHome": "Tilbage til studiehjem"
   },
   "workspace": {
     "back": "Tilbage",
@@ -238,7 +239,8 @@
     "actionLabels": {
       "open_sources": "Åbn kilder",
       "open_knowledge_map": "Åbn videnkort",
-      "open_quiz": "Start quiz"
+      "open_quiz": "Start quiz",
+      "upload_sources": "Upload studiemateriale"
     },
     "storedCitationDetail": "Gemt citationsdetalje",
     "loadCitation": "Indlæser citation…",
@@ -386,5 +388,37 @@
     "sourcesMany": "{count} kilder dækker dette emne.",
     "openInKnowledgeMap": "Åbn i videnkort",
     "startQuiz": "Start quiz om dette emne"
+  },
+  "tutorExperience": {
+    "studyHome": {
+      "title": "Studiehjem",
+      "subtitle": "Mød din TinkeTutor før du åbner noget andet.",
+      "studySpaceLabel": "Studieplads",
+      "renameStudySpace": "Omdøb studieplads",
+      "bootstrapError": "Kunne ikke åbne studiepladsen",
+      "resumeSession": "Fortsæt sessionen",
+      "startFresh": "Start forfra",
+      "sideRailSwitcher": "Dine studiepladser",
+      "openWorkspaceCta": "Åbn arbejdsområde",
+      "defaultStudySpaceName": "Din studieplads",
+      "loading": "Indlæser din tutor…",
+      "loadError": "Kunne ikke indlæse studiehjem",
+      "newStudySpace": "Ny studieplads"
+    },
+    "onboarding": {
+      "greetingEmpty": "Hej! Upload dit første studiemateriale, så guider jeg dig igennem det.",
+      "greetingProcessing": "Dine materialer bliver indekseret. Jeg siger til, når de er klar.",
+      "greetingPartial": "Nogle af dine materialer er klar. Vi kan starte med dem.",
+      "greetingReady": "Dine materialer er klar. Hvad vil du forstå først?",
+      "uploadCta": "Upload studiemateriale",
+      "uploadSubtitle": "PDF, slides eller dokument — jeg holder alt forankret i det, du uploader.",
+      "nextActionLabel": "Foreslået næste skridt"
+    },
+    "sourceState": {
+      "empty": "Ingen materialer endnu",
+      "processing": "Indekserer materialer",
+      "partial": "Nogle materialer er klar",
+      "ready": "Alle materialer er klar"
+    }
   }
 }
