@@ -142,7 +142,7 @@ export function useRequireAuth(redirectTo = '/login') {
   return { user, loading, isAuthenticated: Boolean(user) };
 }
 
-export function useRedirectAuthenticated(redirectTo = '/dashboard') {
+export function useRedirectAuthenticated(redirectTo = '/study') {
   const { user, loading } = useAuth();
   const router = useRouter();
 

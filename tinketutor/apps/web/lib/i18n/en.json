@@ -70,7 +70,8 @@
     "firstNotebookBody": "Upload your study materials and turn them into an interactive learning workspace with knowledge maps, quizzes, and Socratic tutoring.",
     "sourcesCountOne": "📄 1 source",
     "sourcesCountMany": "📄 {count} sources",
-    "notebookFallback": "Notebook"
+    "notebookFallback": "Notebook",
+    "backToStudyHome": "Back to study home"
   },
   "workspace": {
     "back": "Back",
@@ -238,7 +239,8 @@
     "actionLabels": {
       "open_sources": "Open sources",
       "open_knowledge_map": "Open knowledge map",
-      "open_quiz": "Start quiz"
+      "open_quiz": "Start quiz",
+      "upload_sources": "Upload study material"
     },
     "storedCitationDetail": "Stored Citation Detail",
     "loadCitation": "Loading citation…",
@@ -386,5 +388,37 @@
     "sourcesMany": "{count} sources cover this topic.",
     "openInKnowledgeMap": "Open in knowledge map",
     "startQuiz": "Start quiz on this topic"
+  },
+  "tutorExperience": {
+    "studyHome": {
+      "title": "Study Home",
+      "subtitle": "Meet your TinkeTutor before opening anything else.",
+      "studySpaceLabel": "Study space",
+      "renameStudySpace": "Rename study space",
+      "bootstrapError": "Could not open your study space",
+      "resumeSession": "Resume session",
+      "startFresh": "Start fresh",
+      "sideRailSwitcher": "Your study spaces",
+      "openWorkspaceCta": "Open workspace",
+      "defaultStudySpaceName": "Your study space",
+      "loading": "Loading your tutor…",
+      "loadError": "Failed to load study home",
+      "newStudySpace": "New study space"
+    },
+    "onboarding": {
+      "greetingEmpty": "Hi! Upload your first study material and I'll walk through it with you.",
+      "greetingProcessing": "Your materials are being indexed. I'll let you know the moment they're ready.",
+      "greetingPartial": "Some of your materials are ready. We can start with those.",
+      "greetingReady": "Your materials are ready. What would you like to understand first?",
+      "uploadCta": "Upload study material",
+      "uploadSubtitle": "PDF, slides or document — I keep everything grounded in what you upload.",
+      "nextActionLabel": "Suggested next step"
+    },
+    "sourceState": {
+      "empty": "No materials yet",
+      "processing": "Indexing materials",
+      "partial": "Some materials are ready",
+      "ready": "All materials are ready"
+    }
   }
 }

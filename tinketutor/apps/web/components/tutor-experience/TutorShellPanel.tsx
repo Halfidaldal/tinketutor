@@ -1,18 +1,34 @@
 'use client';
 
-import { FormEvent, useCallback, useState } from 'react';
-import { useRouter } from 'next/navigation';
+/**
+ * TutorShellPanel — Study Home variant of the workspace TutorPanel.
+ *
+ * Phase 2: tutor-first shell. This panel leads with the onboarding turn and
+ * renders `upload_sources` as a primary CTA button (not a chip) because the
+ * empty state is *exactly* when we must not fall back to a disabled chat box.
+ *
+ * Differences from `components/tutor/TutorPanel.tsx`:
+ *   - No `canStart` gate: the textarea is always enabled.
+ *   - No focus/selection panel (no canvas context in Study Home).
+ *   - Consumes `useTutorSessionController` so state lives in one place.
+ *   - Accepts `initialSession` + `initialTurns` so server-bootstrapped turns
+ *     render with zero loading flicker.
+ */
 
-import { api } from '../../lib/api';
+import Link from 'next/link';
+import { FormEvent, useState } from 'react';
+
 import { useI18n } from '../../lib/i18n';
 import {
-  buildTutorActionHref,
   TUTOR_MAX_MESSAGES,
+  buildTutorActionHref,
+  type TutorSession,
   type TutorSuggestedAction,
+  type TutorSuggestedActionId,
+  type TutorTurn,
 } from '../../lib/tutor';
 import { useTutorSessionController } from '../../lib/tutor-experience/useTutorSessionController';
-import type { CitationResolution, WorkspaceFocus } from '../../lib/workspace-focus';
-import TutorMessageCard from './TutorMessage';
+import TutorMessageCard from '../tutor/TutorMessage';
 
 const SUPPORT_LABELS: Record<string, string> = {
   supported: 'evidencePanel.assessmentLabels.supported',
@@ -23,37 +39,34 @@ const SUPPORT_LABELS: Record<string, string> = {
   missing_traceability: 'evidencePanel.assessmentLabels.missing_traceability',
 };
 
-interface TutorPanelSource {
-  id: string;
-  title: string;
-  status: string;
+const PRIMARY_CTA_ACTIONS: TutorSuggestedActionId[] = ['upload_sources'];
+
+interface TutorShellPanelProps {
+  notebookId: string;
+  studySpaceTitle: string;
+  initialSession?: TutorSession | null;
+  initialTurns?: TutorTurn[];
+  onRenameStudySpace?: () => void;
+  onSelectSource?: (sourceId: string) => void;
 }
 
-export function TutorPanel({
+export function TutorShellPanel({
   notebookId,
-  focus,
-  onFocusChange,
-  onWorkspacePaneOpenChange,
-}: {
-  notebookId: string;
-  /** Workspace passes ready-source metadata; the panel no longer gates on it
-   *  (Phase 2 removes the empty-state lockout) but the prop stays so callers
-   *  do not need to drop it from the existing layout wiring. */
-  sources?: TutorPanelSource[];
-  focus: WorkspaceFocus;
-  onFocusChange: (focus: WorkspaceFocus) => void;
-  onWorkspacePaneOpenChange: (open: boolean) => void;
-}) {
-  const router = useRouter();
+  studySpaceTitle,
+  initialSession = null,
+  initialTurns = [],
+  onRenameStudySpace,
+}: TutorShellPanelProps) {
   const { uiLocale, responseLocale, t } = useI18n();
   const [query, setQuery] = useState('');
-  const [citationLoading, setCitationLoading] = useState(false);
 
   const controller = useTutorSessionController({
     notebookId,
     uiLocale,
     responseLocale,
-    autoBootstrap: true,
+    initialSession,
+    initialTurns,
+    autoBootstrap: !initialSession,
     translateError: (key) => {
       switch (key) {
         case 'loadSession':
@@ -77,12 +90,11 @@ export function TutorPanel({
     sendQuery,
     escalate,
     reset,
-    setError,
   } = controller;
 
-  const activeFocus = focus && focus.type !== 'citation' ? focus : null;
   const progressCount = session?.message_count ?? 0;
   const progressPercent = Math.min((progressCount / TUTOR_MAX_MESSAGES) * 100, 100);
+
   const canEscalate = Boolean(
     session &&
       latestTutorTurn &&
@@ -91,17 +103,20 @@ export function TutorPanel({
       !latestTutorTurn.insufficient_grounding,
   );
 
-  const getAssessmentLabel = useCallback(
-    (assessment?: string | null) => {
-      if (!assessment) {
-        return '';
-      }
+  const primaryActions = latestTutorTurn?.suggested_actions.filter((action) =>
+    PRIMARY_CTA_ACTIONS.includes(action.id),
+  ) ?? [];
+  const secondaryActions = latestTutorTurn?.suggested_actions.filter(
+    (action) => !PRIMARY_CTA_ACTIONS.includes(action.id),
+  ) ?? [];
 
-      const key = SUPPORT_LABELS[assessment];
-      return key ? t(key) : assessment;
-    },
-    [t],
-  );
+  const getAssessmentLabel = (assessment?: string | null) => {
+    if (!assessment) {
+      return '';
+    }
+    const key = SUPPORT_LABELS[assessment];
+    return key ? t(key) : assessment;
+  };
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -113,53 +128,22 @@ export function TutorPanel({
     }
   }
 
-  async function handleCitationClick(citationId: string) {
-    setCitationLoading(true);
-    setError(null);
-    try {
-      const resolution = (await api.search.getCitation(citationId)) as CitationResolution;
-      onFocusChange({
-        type: 'citation',
-        citationId,
-        resolution,
-      });
-      onWorkspacePaneOpenChange(true);
-      router.push(`/workspace/${notebookId}`);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : t('tutorPanel.citationError'));
-    } finally {
-      setCitationLoading(false);
+  function buildPrimaryCtaCopy(action: TutorSuggestedAction): { label: string; subtitle: string } {
+    if (action.id === 'upload_sources') {
+      return {
+        label: t('tutorExperience.onboarding.uploadCta'),
+        subtitle: t('tutorExperience.onboarding.uploadSubtitle'),
+      };
     }
-  }
-
-  async function handleSelectionFocus() {
-    if (!activeFocus) {
-      return;
-    }
-
-    const prompt =
-      activeFocus.type === 'node'
-        ? t('tutorPanel.selectionFocusNode', { values: { label: activeFocus.node.label } })
-        : t('tutorPanel.selectionFocusEdge', {
-            values: {
-              sourceLabel: activeFocus.sourceLabel,
-              label: activeFocus.edge.label,
-              targetLabel: activeFocus.targetLabel,
-            },
-          });
-
-    const focusArea =
-      activeFocus.type === 'node' ? activeFocus.node.label : activeFocus.edge.label;
-    await sendQuery(prompt, { focusArea });
-  }
-
-  function handleSuggestedAction(action: TutorSuggestedAction) {
-    onWorkspacePaneOpenChange(true);
-    router.push(buildTutorActionHref(action.id, notebookId, session?.focus_area));
+    return {
+      label: t(`tutorPanel.actionLabels.${action.id}`),
+      subtitle: '',
+    };
   }
 
   return (
     <div style={{ height: '100%', display: 'flex', flexDirection: 'column', minHeight: 0 }}>
+      {/* Header */}
       <div
         className="glass"
         style={{
@@ -173,9 +157,46 @@ export function TutorPanel({
         }}
       >
         <div style={{ minWidth: 0, display: 'grid', gap: '0.35rem' }}>
-          <span style={{ fontSize: '0.8125rem', fontWeight: 700, color: 'var(--color-text-secondary)' }}>
-            {t('tutorPanel.guidedTutor')}
+          <span
+            style={{
+              fontSize: '0.6875rem',
+              fontWeight: 700,
+              letterSpacing: '0.08em',
+              textTransform: 'uppercase',
+              color: 'var(--color-text-tertiary)',
+            }}
+          >
+            {t('tutorExperience.studyHome.studySpaceLabel')}
           </span>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
+            <span
+              style={{
+                fontSize: '1rem',
+                fontWeight: 700,
+                color: 'var(--color-text-primary)',
+                lineHeight: 1.2,
+              }}
+            >
+              {studySpaceTitle}
+            </span>
+            {onRenameStudySpace && (
+              <button
+                type="button"
+                onClick={onRenameStudySpace}
+                style={{
+                  fontSize: '0.6875rem',
+                  padding: '0.2rem 0.5rem',
+                  borderRadius: 'var(--radius-full)',
+                  border: '1px solid var(--color-border-secondary)',
+                  background: 'transparent',
+                  color: 'var(--color-text-tertiary)',
+                  cursor: 'pointer',
+                }}
+              >
+                {t('tutorExperience.studyHome.renameStudySpace')}
+              </button>
+            )}
+          </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
             <span
               style={{
@@ -191,15 +212,12 @@ export function TutorPanel({
             >
               {t(`tutorPanel.modeLabels.${session?.current_mode || 'onboarding'}`)}
             </span>
-            <span style={{ fontSize: '0.75rem', color: 'var(--color-text-secondary)' }}>
-              {t('tutorPanel.topicLabel')}: {session?.focus_area || t('tutorPanel.noTopic')}
-            </span>
+            {latestTutorTurn?.support_assessment && (
+              <span style={{ fontSize: '0.6875rem', color: 'var(--color-text-tertiary)' }}>
+                {getAssessmentLabel(latestTutorTurn.support_assessment)}
+              </span>
+            )}
           </div>
-          {latestTutorTurn?.support_assessment && (
-            <span style={{ fontSize: '0.6875rem', color: 'var(--color-text-tertiary)' }}>
-              {getAssessmentLabel(latestTutorTurn.support_assessment)}
-            </span>
-          )}
         </div>
 
         <div style={{ minWidth: 140, display: 'grid', gap: '0.35rem' }}>
@@ -250,6 +268,8 @@ export function TutorPanel({
               border: '1px solid var(--color-border-secondary)',
               borderRadius: 'var(--radius-full)',
               padding: '0.25rem 0.5rem',
+              background: 'transparent',
+              cursor: 'pointer',
             }}
           >
             {t('common.newSession')}
@@ -257,6 +277,7 @@ export function TutorPanel({
         </div>
       </div>
 
+      {/* Messages */}
       <div
         style={{
           flex: 1,
@@ -269,7 +290,7 @@ export function TutorPanel({
       >
         {loading && (
           <div style={{ fontSize: '0.75rem', color: 'var(--color-text-tertiary)' }}>
-            {t('tutorPanel.loadingHistory')}
+            {t('tutorExperience.studyHome.loading')}
           </div>
         )}
 
@@ -288,31 +309,6 @@ export function TutorPanel({
           </div>
         )}
 
-        {!loading && turns.length === 0 && !error && (
-          <div className="surface" style={{ padding: '1rem', display: 'grid', gap: '0.5rem' }}>
-            <div
-              style={{
-                fontSize: '0.75rem',
-                fontWeight: 700,
-                letterSpacing: '0.08em',
-                textTransform: 'uppercase',
-                color: 'var(--color-accent-secondary)',
-              }}
-            >
-              {t('tutorPanel.howItWorks')}
-            </div>
-            <div
-              style={{
-                fontSize: '0.8125rem',
-                color: 'var(--color-text-secondary)',
-                lineHeight: 1.65,
-              }}
-            >
-              {t('tutorPanel.howItWorksBody')}
-            </div>
-          </div>
-        )}
-
         {turns.map((turn) => (
           <div key={turn.id} style={{ display: 'grid', gap: '0.625rem' }}>
             <TutorMessageCard
@@ -321,7 +317,6 @@ export function TutorPanel({
               tutorState={turn.tutor_state}
               evidenceItems={turn.evidence_items}
               createdAt={turn.created_at}
-              onCitationClick={handleCitationClick}
             />
 
             {turn.role === 'tutor' &&
@@ -358,6 +353,7 @@ export function TutorPanel({
         ))}
       </div>
 
+      {/* Footer / Composer */}
       <div
         className="glass"
         style={{
@@ -368,62 +364,36 @@ export function TutorPanel({
           flexShrink: 0,
         }}
       >
-        {activeFocus && (
-          <div className="surface" style={{ padding: '0.875rem', display: 'grid', gap: '0.5rem' }}>
-            <div
+        {/* Primary CTA: upload_sources renders as a full-width button, not a chip */}
+        {primaryActions.map((action) => {
+          const copy = buildPrimaryCtaCopy(action);
+          const href = buildTutorActionHref(action.id, notebookId, session?.focus_area);
+          return (
+            <Link
+              key={action.id}
+              href={href}
               style={{
-                fontSize: '0.6875rem',
-                letterSpacing: '0.08em',
-                textTransform: 'uppercase',
-                color: 'var(--color-text-tertiary)',
+                display: 'grid',
+                gap: '0.35rem',
+                padding: '0.85rem 1rem',
+                borderRadius: 'var(--radius-lg)',
+                background: 'var(--color-accent-primary)',
+                color: '#fff',
+                textDecoration: 'none',
+                boxShadow: 'var(--shadow-md)',
               }}
             >
-              {t('tutorPanel.canvasFocus')}
-            </div>
-            <div
-              style={{
-                fontSize: '0.8125rem',
-                fontWeight: 600,
-                color: 'var(--color-text-primary)',
-                lineHeight: 1.45,
-              }}
-            >
-              {activeFocus.type === 'node'
-                ? activeFocus.node.label
-                : `${activeFocus.sourceLabel} ${activeFocus.edge.label} ${activeFocus.targetLabel}`}
-            </div>
-            <div
-              style={{
-                fontSize: '0.75rem',
-                color: 'var(--color-text-secondary)',
-                lineHeight: 1.55,
-              }}
-            >
-              {activeFocus.type === 'node'
-                ? activeFocus.node.summary || t('tutorPanel.selectionFallbackNode')
-                : activeFocus.edge.summary || t('tutorPanel.selectionFallbackEdge')}
-            </div>
-            <button
-              type="button"
-              onClick={() => handleSelectionFocus()}
-              disabled={submitting}
-              style={{
-                justifySelf: 'start',
-                padding: '0.5rem 0.75rem',
-                borderRadius: 'var(--radius-md)',
-                border: '1px solid var(--color-border-secondary)',
-                background: 'transparent',
-                fontSize: '0.75rem',
-                color: 'var(--color-text-secondary)',
-                opacity: submitting ? 0.6 : 1,
-              }}
-            >
-              {t('tutorPanel.askAboutSelection')}
-            </button>
-          </div>
-        )}
+              <span style={{ fontSize: '0.9375rem', fontWeight: 700 }}>{copy.label}</span>
+              {copy.subtitle && (
+                <span style={{ fontSize: '0.75rem', opacity: 0.9, lineHeight: 1.45 }}>
+                  {copy.subtitle}
+                </span>
+              )}
+            </Link>
+          );
+        })}
 
-        {latestTutorTurn && latestTutorTurn.suggested_actions.length > 0 && (
+        {secondaryActions.length > 0 && (
           <div style={{ display: 'grid', gap: '0.4rem' }}>
             <div
               style={{
@@ -436,11 +406,10 @@ export function TutorPanel({
               {t('tutorPanel.suggestedActions')}
             </div>
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem' }}>
-              {latestTutorTurn.suggested_actions.map((action) => (
-                <button
+              {secondaryActions.map((action) => (
+                <Link
                   key={action.id}
-                  type="button"
-                  onClick={() => handleSuggestedAction(action)}
+                  href={buildTutorActionHref(action.id, notebookId, session?.focus_area)}
                   style={{
                     padding: '0.45rem 0.7rem',
                     borderRadius: 'var(--radius-full)',
@@ -449,10 +418,11 @@ export function TutorPanel({
                     color: 'var(--color-accent-primary)',
                     fontSize: '0.75rem',
                     fontWeight: 600,
+                    textDecoration: 'none',
                   }}
                 >
                   {t(`tutorPanel.actionLabels.${action.id}`)}
-                </button>
+                </Link>
               ))}
             </div>
           </div>
@@ -471,6 +441,7 @@ export function TutorPanel({
                 border: '1px solid var(--color-border-secondary)',
                 fontSize: '0.75rem',
                 color: 'var(--color-text-secondary)',
+                cursor: 'pointer',
               }}
             >
               {t('tutorPanel.showMoreHelp')}
@@ -486,6 +457,7 @@ export function TutorPanel({
                 border: '1px solid var(--color-warning)',
                 fontSize: '0.75rem',
                 color: 'var(--color-warning)',
+                cursor: 'pointer',
               }}
             >
               {t('tutorPanel.giveMeTheAnswer')}
@@ -495,13 +467,13 @@ export function TutorPanel({
 
         <form onSubmit={handleSubmit} style={{ display: 'grid', gap: '0.75rem' }}>
           <label
-            htmlFor="tutor-query"
+            htmlFor="tutor-shell-query"
             style={{ fontSize: '0.75rem', fontWeight: 500, color: 'var(--color-text-secondary)' }}
           >
             {t('tutorPanel.studyQuestion')}
           </label>
           <textarea
-            id="tutor-query"
+            id="tutor-shell-query"
             value={query}
             onChange={(event) => setQuery(event.target.value)}
             rows={3}
@@ -529,6 +501,8 @@ export function TutorPanel({
               fontSize: '0.8125rem',
               fontWeight: 600,
               opacity: submitting || !query.trim() ? 0.6 : 1,
+              border: 'none',
+              cursor: submitting || !query.trim() ? 'default' : 'pointer',
             }}
           >
             {submitting
@@ -538,15 +512,9 @@ export function TutorPanel({
                 : t('tutorPanel.startGuidedStudy')}
           </button>
         </form>
-
-        {citationLoading && (
-          <div style={{ fontSize: '0.75rem', color: 'var(--color-text-tertiary)' }}>
-            {t('tutorPanel.loadCitation')}
-          </div>
-        )}
       </div>
     </div>
   );
 }
 
-export default TutorPanel;
+export default TutorShellPanel;

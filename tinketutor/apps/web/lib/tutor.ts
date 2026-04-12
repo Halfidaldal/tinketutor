@@ -1,6 +1,10 @@
 export const TUTOR_MAX_MESSAGES = 20;
 
-export type TutorSuggestedActionId = 'open_sources' | 'open_knowledge_map' | 'open_quiz';
+export type TutorSuggestedActionId =
+  | 'open_sources'
+  | 'open_knowledge_map'
+  | 'open_quiz'
+  | 'upload_sources';
 
 export interface TutorEvidenceItem {
   source_id: string;
@@ -58,6 +62,7 @@ export interface TutorSession {
   message_count: number;
   hint_level: number;
   language: string;
+  response_locale?: string;
   last_user_message?: string | null;
   last_evidence_pack_id?: string | null;
   created_at: string;
@@ -161,7 +166,7 @@ export function buildTutorActionHref(
   notebookId: string,
   focusArea?: string | null,
 ): string {
-  if (actionId === 'open_sources') {
+  if (actionId === 'upload_sources' || actionId === 'open_sources') {
     return `/workspace/${notebookId}`;
   }
 

@@ -26,22 +26,45 @@ class StartTutorSessionRequest(BaseModel):
     focus_area: str | None = Field(default=None, alias="focusArea")
     source_ids: list[str] = Field(default_factory=list, alias="sourceIds")
     locale: str | None = None
+    ui_locale: str | None = Field(default=None, alias="uiLocale")
+    response_locale: str | None = Field(default=None, alias="responseLocale")
+    intent: str | None = None
 
     model_config = {"populate_by_name": True}
 
     def resolved_query(self) -> str:
         return (self.query or self.focus_area or "").strip()
 
+    def effective_response_locale(self) -> str | None:
+        return self.response_locale or self.locale
+
+    def effective_ui_locale(self) -> str | None:
+        return self.ui_locale or self.locale
+
 
 class ContinueTutorRequest(BaseModel):
     content: str
     locale: str | None = None
+    ui_locale: str | None = Field(default=None, alias="uiLocale")
+    response_locale: str | None = Field(default=None, alias="responseLocale")
+
+    model_config = {"populate_by_name": True}
+
+    def effective_response_locale(self) -> str | None:
+        return self.response_locale or self.locale
 
 
 class EscalateTutorRequest(BaseModel):
     action: TutorEscalationAction
     content: str | None = None
     locale: str | None = None
+    ui_locale: str | None = Field(default=None, alias="uiLocale")
+    response_locale: str | None = Field(default=None, alias="responseLocale")
+
+    model_config = {"populate_by_name": True}
+
+    def effective_response_locale(self) -> str | None:
+        return self.response_locale or self.locale
 
 
 class TutorEvidenceItemResponse(BaseModel):
@@ -85,6 +108,7 @@ class TutorTurnResponse(BaseModel):
     insufficient_grounding: bool
     insufficiency_reason: str | None = None
     language: str
+    response_locale: str
     created_at: str
 
 
@@ -100,6 +124,7 @@ class TutorSessionResponse(BaseModel):
     message_count: int
     hint_level: int
     language: str
+    response_locale: str
     last_user_message: str | None = None
     last_evidence_pack_id: str | None = None
     created_at: str
@@ -154,6 +179,7 @@ def _serialize_session(session) -> dict[str, Any]:
         "message_count": session.message_count,
         "hint_level": session.hint_level,
         "language": session.language.value,
+        "response_locale": session.language.value,
         "last_user_message": session.last_user_message,
         "last_evidence_pack_id": session.last_evidence_pack_id,
         "created_at": session.created_at.isoformat(),
@@ -205,6 +231,7 @@ def _serialize_turn(turn) -> dict[str, Any]:
         "insufficient_grounding": turn.insufficient_grounding,
         "insufficiency_reason": turn.insufficiency_reason,
         "language": turn.language.value,
+        "response_locale": turn.language.value,
         "created_at": turn.created_at.isoformat(),
     }
 
@@ -225,6 +252,46 @@ async def start_tutor_session(
             query=request.resolved_query(),
             source_ids=request.source_ids,
             locale=request.locale,
+            ui_locale=request.effective_ui_locale(),
+            response_locale=request.effective_response_locale(),
+            intent=request.intent,
+            vector_store=vector_store,
+            embedding_provider=embedding_provider,
+            reranker=reranker,
+        )
+    except Exception as error:
+        _raise_from_domain_error(error)
+
+    return {
+        "session": _serialize_session(session),
+        "turn": _serialize_turn(turn),
+    }
+
+
+@router.post(
+    "/{notebook_id}/tutor/sessions/bootstrap",
+    response_model=TutorTurnEnvelope,
+)
+async def bootstrap_tutor_session(
+    notebook_id: str,
+    request: StartTutorSessionRequest,
+    user: AuthenticatedUser = Depends(get_current_user),
+    vector_store: VectorStore = Depends(get_vectors),
+    embedding_provider: EmbeddingProvider = Depends(get_embeddings),
+    reranker: Reranker = Depends(get_rerankers),
+):
+    """Idempotently return (or create) an onboarding tutor session for the notebook.
+
+    Used by the Study Home shell and the workspace tutor panel to attach to the
+    learner's active session on mount without generating duplicate onboarding turns.
+    """
+    try:
+        session, turn = await tutor_service.bootstrap_session(
+            notebook_id=notebook_id,
+            user_id=user.user_id,
+            locale=request.locale,
+            ui_locale=request.effective_ui_locale(),
+            response_locale=request.effective_response_locale(),
             vector_store=vector_store,
             embedding_provider=embedding_provider,
             reranker=reranker,
@@ -331,6 +398,7 @@ async def continue_tutor_session(
             user_id=user.user_id,
             content=request.content,
             locale=request.locale,
+            response_locale=request.effective_response_locale(),
             vector_store=vector_store,
             embedding_provider=embedding_provider,
             reranker=reranker,
@@ -362,6 +430,7 @@ async def escalate_tutor_session(
             action=request.action,
             content=request.content,
             locale=request.locale,
+            response_locale=request.effective_response_locale(),
             vector_store=vector_store,
             embedding_provider=embedding_provider,
             reranker=reranker,
