@@ -15,6 +15,7 @@
 import Link from 'next/link';
 import { useCallback, useEffect, useState } from 'react';
 
+import ConfirmDialog from '../../components/shared/ConfirmDialog';
 import TutorShellPanel from '../../components/tutor-experience/TutorShellPanel';
 import { api } from '../../lib/api';
 import { useAuth, useRequireAuth } from '../../lib/hooks';
@@ -58,6 +59,7 @@ export default function StudyHomeShell() {
   const [initialTurns, setInitialTurns] = useState<TutorTurn[]>([]);
   const [viewState, setViewState] = useState<ViewState>('loading');
   const [error, setError] = useState<string | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<NotebookSummary | null>(null);
 
   const bootstrapStudyHome = useCallback(
     async (preferredNotebookId?: string) => {
@@ -103,6 +105,21 @@ export default function StudyHomeShell() {
     },
     [responseLocale, t, uiLocale],
   );
+
+  async function handleDeleteNotebook() {
+    if (!deleteTarget) return;
+    try {
+      await api.notebooks.delete(deleteTarget.id);
+      if (activeNotebook?.id === deleteTarget.id) {
+        setActiveNotebook(null);
+        setInitialSession(null);
+        setInitialTurns([]);
+      }
+      setNotebooks((prev) => prev.filter((n) => n.id !== deleteTarget.id));
+    } finally {
+      setDeleteTarget(null);
+    }
+  }
 
   useEffect(() => {
     if (!authLoading && isAuthenticated) {
@@ -252,50 +269,121 @@ export default function StudyHomeShell() {
           )}
 
           <div style={{ display: 'grid', gap: '0.4rem' }}>
-            {notebooks.map((notebook) => {
+            {(() => {
+              // Group notebooks by description (as subject)
+              const grouped = new Map<string, NotebookSummary[]>();
+              for (const nb of notebooks) {
+                const subject = nb.description?.trim() || t('tutorExperience.studyHome.otherSubject');
+                if (!grouped.has(subject)) grouped.set(subject, []);
+                grouped.get(subject)!.push(nb);
+              }
+              const entries = Array.from(grouped.entries());
+              const showGroups = entries.length > 1;
+
+              return entries.map(([subject, group]) => (
+                <div key={subject} style={{ display: 'grid', gap: '0.3rem' }}>
+                  {showGroups && (
+                    <div
+                      style={{
+                        fontSize: '0.625rem',
+                        fontWeight: 700,
+                        letterSpacing: '0.06em',
+                        textTransform: 'uppercase',
+                        color: 'var(--color-accent-secondary)',
+                        marginTop: '0.5rem',
+                        marginBottom: '0.1rem',
+                        overflow: 'hidden',
+                        textOverflow: 'ellipsis',
+                        whiteSpace: 'nowrap',
+                      }}
+                    >
+                      {subject}
+                    </div>
+                  )}
+                  {group.map((notebook) => {
               const isActive = activeNotebook?.id === notebook.id;
               return (
-                <button
+                <div
                   key={notebook.id}
-                  type="button"
-                  onClick={() => void bootstrapStudyHome(notebook.id)}
                   style={{
-                    textAlign: 'left',
-                    padding: '0.6rem 0.75rem',
-                    borderRadius: 'var(--radius-md)',
-                    border: `1px solid ${
-                      isActive ? 'var(--color-border-accent)' : 'var(--color-border-secondary)'
-                    }`,
-                    background: isActive
-                      ? 'var(--color-accent-glow)'
-                      : 'transparent',
-                    color: isActive
-                      ? 'var(--color-accent-primary)'
-                      : 'var(--color-text-primary)',
-                    fontSize: '0.8125rem',
-                    fontWeight: isActive ? 600 : 500,
-                    cursor: 'pointer',
-                    display: 'grid',
-                    gap: '0.2rem',
+                    position: 'relative',
+                    display: 'flex',
+                    alignItems: 'stretch',
                   }}
                 >
-                  <span>{notebook.title || t('tutorExperience.studyHome.defaultStudySpaceName')}</span>
-                  <span
+                  <button
+                    type="button"
+                    onClick={() => void bootstrapStudyHome(notebook.id)}
                     style={{
-                      fontSize: '0.6875rem',
-                      color: 'var(--color-text-tertiary)',
-                      fontWeight: 500,
+                      flex: 1,
+                      textAlign: 'left',
+                      padding: '0.6rem 2rem 0.6rem 0.75rem',
+                      borderRadius: 'var(--radius-md)',
+                      border: `1px solid ${
+                        isActive ? 'var(--color-border-accent)' : 'var(--color-border-secondary)'
+                      }`,
+                      background: isActive
+                        ? 'var(--color-accent-glow)'
+                        : 'transparent',
+                      color: isActive
+                        ? 'var(--color-accent-primary)'
+                        : 'var(--color-text-primary)',
+                      fontSize: '0.8125rem',
+                      fontWeight: isActive ? 600 : 500,
+                      cursor: 'pointer',
+                      display: 'grid',
+                      gap: '0.2rem',
                     }}
                   >
-                    {notebook.source_ids.length === 1
-                      ? t('dashboard.sourcesCountOne')
-                      : t('dashboard.sourcesCountMany', {
-                          values: { count: notebook.source_ids.length },
-                        })}
-                  </span>
-                </button>
+                    <span>{notebook.title || t('tutorExperience.studyHome.defaultStudySpaceName')}</span>
+                    <span
+                      style={{
+                        fontSize: '0.6875rem',
+                        color: 'var(--color-text-tertiary)',
+                        fontWeight: 500,
+                      }}
+                    >
+                      {notebook.source_ids.length === 1
+                        ? t('dashboard.sourcesCountOne')
+                        : t('dashboard.sourcesCountMany', {
+                            values: { count: notebook.source_ids.length },
+                          })}
+                    </span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setDeleteTarget(notebook);
+                    }}
+                    title={t('common.delete')}
+                    style={{
+                      position: 'absolute',
+                      right: '0.375rem',
+                      top: '50%',
+                      transform: 'translateY(-50%)',
+                      width: 22,
+                      height: 22,
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      borderRadius: 'var(--radius-sm)',
+                      fontSize: '0.7rem',
+                      color: 'var(--color-text-tertiary)',
+                      opacity: 0.5,
+                      background: 'transparent',
+                      border: 'none',
+                      cursor: 'pointer',
+                    }}
+                  >
+                    ✕
+                  </button>
+                </div>
               );
             })}
+                </div>
+              ));
+            })()}
           </div>
 
           {activeNotebook && (
@@ -376,6 +464,15 @@ export default function StudyHomeShell() {
           )}
         </section>
       </main>
+
+      <ConfirmDialog
+        open={!!deleteTarget}
+        title={t('common.deleteConfirmTitle')}
+        message={deleteTarget ? t('dashboard.deleteConfirm', { values: { title: deleteTarget.title } }) : ''}
+        onConfirm={() => void handleDeleteNotebook()}
+        onCancel={() => setDeleteTarget(null)}
+        variant="danger"
+      />
     </div>
   );
 }

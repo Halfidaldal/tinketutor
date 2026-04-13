@@ -3,6 +3,7 @@
 import Link from 'next/link';
 import { useCallback, useEffect, useState } from 'react';
 
+import ConfirmDialog from '../../components/shared/ConfirmDialog';
 import { api } from '../../lib/api';
 import { useAuth, useRequireAuth } from '../../lib/hooks';
 import { useI18n } from '../../lib/i18n';
@@ -30,6 +31,7 @@ export default function DashboardPage() {
   const [newTitle, setNewTitle] = useState('');
   const [newDescription, setNewDescription] = useState('');
   const [creating, setCreating] = useState(false);
+  const [deleteTarget, setDeleteTarget] = useState<Notebook | null>(null);
 
   const fetchNotebooks = useCallback(async () => {
     try {
@@ -48,6 +50,16 @@ export default function DashboardPage() {
       void fetchNotebooks();
     }
   }, [authLoading, fetchNotebooks, isAuthenticated]);
+
+  async function handleDeleteNotebook() {
+    if (!deleteTarget) return;
+    try {
+      await api.notebooks.delete(deleteTarget.id);
+      await fetchNotebooks();
+    } finally {
+      setDeleteTarget(null);
+    }
+  }
 
   const handleCreate = async (event: React.FormEvent) => {
     event.preventDefault();
@@ -380,54 +392,90 @@ export default function DashboardPage() {
             }}
           >
             {notebooks.map((notebook) => (
-              <Link
-                key={notebook.id}
-                href={`/workspace/${notebook.id}`}
-                className="surface"
-                style={{
-                  padding: '1.25rem',
-                  textDecoration: 'none',
-                  color: 'inherit',
-                  transition: 'border-color var(--transition-fast)',
-                  display: 'block',
-                }}
-              >
-                <h3 style={{ fontWeight: 500, marginBottom: '0.375rem', fontSize: '1rem' }}>
-                  {notebook.title || t('dashboard.notebookFallback')}
-                </h3>
-                {notebook.description && (
-                  <p
-                    style={{
-                      fontSize: '0.8125rem',
-                      color: 'var(--color-text-secondary)',
-                      marginBottom: '0.75rem',
-                      lineHeight: 1.5,
-                    }}
-                  >
-                    {notebook.description}
-                  </p>
-                )}
-                <div
+              <div key={notebook.id} className="surface" style={{ position: 'relative' }}>
+                <Link
+                  href={`/workspace/${notebook.id}`}
                   style={{
-                    display: 'flex',
-                    gap: '0.75rem',
-                    fontSize: '0.75rem',
-                    color: 'var(--color-text-tertiary)',
+                    padding: '1.25rem',
+                    textDecoration: 'none',
+                    color: 'inherit',
+                    display: 'block',
                   }}
                 >
-                  <span>
-                    {notebook.source_ids.length === 1
-                      ? t('dashboard.sourcesCountOne')
-                      : t('dashboard.sourcesCountMany', { values: { count: notebook.source_ids.length } })}
-                  </span>
-                  <span>·</span>
-                  <span>{formatDate(notebook.updated_at)}</span>
-                </div>
-              </Link>
+                  <h3 style={{ fontWeight: 500, marginBottom: '0.375rem', fontSize: '1rem', paddingRight: '1.5rem' }}>
+                    {notebook.title || t('dashboard.notebookFallback')}
+                  </h3>
+                  {notebook.description && (
+                    <p
+                      style={{
+                        fontSize: '0.8125rem',
+                        color: 'var(--color-text-secondary)',
+                        marginBottom: '0.75rem',
+                        lineHeight: 1.5,
+                      }}
+                    >
+                      {notebook.description}
+                    </p>
+                  )}
+                  <div
+                    style={{
+                      display: 'flex',
+                      gap: '0.75rem',
+                      fontSize: '0.75rem',
+                      color: 'var(--color-text-tertiary)',
+                    }}
+                  >
+                    <span>
+                      {notebook.source_ids.length === 1
+                        ? t('dashboard.sourcesCountOne')
+                        : t('dashboard.sourcesCountMany', { values: { count: notebook.source_ids.length } })}
+                    </span>
+                    <span>·</span>
+                    <span>{formatDate(notebook.updated_at)}</span>
+                  </div>
+                </Link>
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setDeleteTarget(notebook);
+                  }}
+                  title={t('common.delete')}
+                  style={{
+                    position: 'absolute',
+                    top: '0.75rem',
+                    right: '0.75rem',
+                    width: 28,
+                    height: 28,
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    borderRadius: 'var(--radius-sm)',
+                    fontSize: '0.8rem',
+                    color: 'var(--color-text-tertiary)',
+                    opacity: 0.6,
+                    background: 'transparent',
+                    border: 'none',
+                    cursor: 'pointer',
+                    transition: 'opacity var(--transition-fast), color var(--transition-fast)',
+                  }}
+                >
+                  ✕
+                </button>
+              </div>
             ))}
           </div>
         )}
       </main>
+
+      <ConfirmDialog
+        open={!!deleteTarget}
+        title={t('common.deleteConfirmTitle')}
+        message={deleteTarget ? t('dashboard.deleteConfirm', { values: { title: deleteTarget.title } }) : ''}
+        onConfirm={() => void handleDeleteNotebook()}
+        onCancel={() => setDeleteTarget(null)}
+        variant="danger"
+      />
     </div>
   );
 }

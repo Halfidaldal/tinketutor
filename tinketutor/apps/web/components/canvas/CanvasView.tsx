@@ -315,13 +315,13 @@ export default function CanvasView({
               }).catch(() => undefined);
             }}
             proOptions={{ hideAttribution: true }}
-            style={{ background: 'linear-gradient(180deg, rgba(248,250,252,0.92), rgba(241,245,249,0.7))' }}
+            style={{ background: 'var(--color-bg-primary)' }}
           >
-            <Background color="rgba(148, 163, 184, 0.22)" gap={24} />
+            <Background color="rgba(124, 109, 245, 0.08)" gap={24} />
             <MiniMap
               pannable
               zoomable
-              maskColor="rgba(15, 23, 42, 0.05)"
+              maskColor="rgba(26, 26, 46, 0.05)"
               nodeColor={(node) => {
                 const support = (node.data as unknown as CanvasFlowNodeData).support;
                 return SUPPORT_STYLE[support].stroke;

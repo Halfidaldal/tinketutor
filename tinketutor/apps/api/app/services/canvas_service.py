@@ -7,6 +7,9 @@ import math
 import re
 import unicodedata
 
+import json
+import logging
+
 from app.config import settings
 from app.domain.enums import (
     CitationOutputType,
@@ -23,14 +26,18 @@ from app.domain.models import (
     ConceptEvidenceReference,
     ConceptMap,
     ConceptNode,
+    GenerationConfig,
     Source,
 )
 from app.infra.store import new_id, utc_now
+from app.prompts.canvas_prompts import CONCEPT_EXTRACTION_PROMPT
 from app.providers.embedding import EmbeddingProvider
 from app.providers.reranker import Reranker
 from app.providers.vector_store import VectorStore
 from app.repositories import concept_map_repository, knowledge_retrieval_repository
 from app.services import citation_service, notebook_service, search_service
+
+logger = logging.getLogger(__name__)
 
 
 WORD_RE = re.compile(r"[A-Za-zÀ-ÖØ-öø-ÿ][A-Za-zÀ-ÖØ-öø-ÿ0-9-]*", flags=re.UNICODE)
@@ -252,6 +259,64 @@ def _deduplicate_candidates(candidates: list[dict], max_candidates: int) -> list
     return chosen
 
 
+async def _derive_candidate_labels_llm(
+    chunks: list[Chunk],
+    node_target: int,
+) -> list[str] | None:
+    """Extract concept labels using the LLM. Returns None on failure (fallback to regex)."""
+    try:
+        from app.providers.factory import get_llm_provider
+        llm = get_llm_provider(role="structured")
+    except Exception:
+        logger.info("LLM provider not available for concept extraction")
+        return None
+
+    try:
+        # Build chunk text for the prompt (limit to avoid huge prompts)
+        chunk_texts = []
+        total_chars = 0
+        for chunk in chunks:
+            text = chunk.content[:500]
+            if chunk.position.section_title:
+                text = f"[{chunk.position.section_title}] {text}"
+            chunk_texts.append(text)
+            total_chars += len(text)
+            if total_chars > 12000:
+                break
+
+        chunks_text = "\n---\n".join(chunk_texts)
+        edge_count = min(node_target * 2, 20)
+
+        prompt = CONCEPT_EXTRACTION_PROMPT.format(
+            node_count=node_target,
+            edge_count=edge_count,
+            chunks_text=chunks_text,
+        )
+
+        config = GenerationConfig(
+            temperature=0.3,
+            max_tokens=2048,
+            response_format="json",
+        )
+        response = await llm.generate(prompt, [], config)
+        content = response.content.strip()
+
+        # Parse JSON response
+        parsed = json.loads(content)
+        concepts = parsed.get("concepts", [])
+        if not concepts or not isinstance(concepts, list):
+            return None
+
+        labels = [c["label"] for c in concepts if isinstance(c, dict) and c.get("label")]
+        if len(labels) < 3:
+            return None
+
+        return labels[:node_target]
+    except Exception:
+        logger.warning("LLM concept extraction failed, falling back to regex", exc_info=True)
+        return None
+
+
 def _derive_candidate_labels(chunks: list[Chunk], sources_by_id: dict[str, Source]) -> list[str]:
     phrase_frequency: Counter[str] = Counter()
     chunk_occurrences: dict[str, set[str]] = defaultdict(set)
@@ -383,21 +448,52 @@ def _reference_from_evidence_item(item) -> ConceptEvidenceReference:
 
 
 def _assign_positions(nodes: list[ConceptNode]) -> list[ConceptNode]:
+    """Assign hierarchical positions: strongest nodes at top, weaker ones below."""
     if not nodes:
         return nodes
-    columns = min(3, max(2, math.ceil(math.sqrt(len(nodes)))))
-    positioned: list[ConceptNode] = []
+
+    # Sort by support strength descending, then alphabetical
     ordered = sorted(
         nodes,
         key=lambda node: (-_support_rank(node.support), node.label.casefold()),
     )
-    for index, node in enumerate(ordered):
-        column = index % columns
-        row = index // columns
-        node.position_x = 160 + (column * 280)
-        node.position_y = 100 + (row * 180)
-        positioned.append(node)
-    return positioned
+
+    # Hierarchical layout: strong at top, weaker at bottom
+    # Tier 1 (strong): centered at top
+    # Tier 2 (partial): wider spread in middle
+    # Tier 3 (weak/skeleton): bottom
+    tiers: list[list[ConceptNode]] = [[], [], []]
+    for node in ordered:
+        rank = _support_rank(node.support)
+        if rank >= 3:
+            tiers[0].append(node)
+        elif rank >= 2:
+            tiers[1].append(node)
+        else:
+            tiers[2].append(node)
+
+    # If all nodes are same tier, distribute evenly
+    if not tiers[0] and not tiers[2]:
+        tiers = [ordered[:3], ordered[3:7], ordered[7:]]
+    elif not tiers[0]:
+        half = len(ordered) // 2
+        tiers = [ordered[:max(1, half // 2)], ordered[max(1, half // 2):half], ordered[half:]]
+
+    y_offset = 80
+    x_center = 600
+    spacing_x = 260
+    spacing_y = 200
+
+    for tier_index, tier in enumerate(tiers):
+        if not tier:
+            continue
+        tier_width = (len(tier) - 1) * spacing_x
+        start_x = x_center - tier_width / 2
+        for i, node in enumerate(tier):
+            node.position_x = int(start_x + i * spacing_x)
+            node.position_y = int(y_offset + tier_index * spacing_y)
+
+    return ordered
 
 
 def _build_guiding_question(label: str) -> str:
@@ -832,7 +928,12 @@ async def generate_concept_map(
         )
         return concept_map, [], []
 
-    candidate_labels = _derive_candidate_labels(chunks, ready_sources_by_id)
+    # Try LLM concept extraction first, fall back to regex
+    node_target = max(5, settings.canvas_node_target)
+    candidate_labels = await _derive_candidate_labels_llm(chunks, node_target)
+    llm_used = candidate_labels is not None
+    if candidate_labels is None:
+        candidate_labels = _derive_candidate_labels(chunks, ready_sources_by_id)
     nodes = await _build_grounded_nodes(
         notebook_id=notebook_id,
         user_id=user_id,
@@ -883,7 +984,7 @@ async def generate_concept_map(
         "uncertain_node_count": sum(1 for node in nodes if node.uncertain),
         "uncertain_edge_count": sum(1 for edge in edges if edge.uncertain),
         "retrieval_mode": "lexical_first",
-        "llm_structured_pass_used": False,
+        "llm_structured_pass_used": llm_used,
     }
     concept_map.updated_at = utc_now()
     concept_map.generated_at = utc_now()

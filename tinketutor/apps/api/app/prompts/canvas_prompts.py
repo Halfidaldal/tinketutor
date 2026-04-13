@@ -1,12 +1,39 @@
 """
 Canvas Generation Prompts
 
-Skeleton concept map generation from source material.
-TODO: [Phase 2] Write actual prompt templates for canvas generation.
-
-Expected output: structured JSON with nodes (10-15) and edges (12-18),
-including 2-4 skeleton nodes with guiding questions.
+LLM-powered concept extraction from source material.
+Used to replace regex phrase extraction with semantic concept identification.
 """
+
+CONCEPT_EXTRACTION_PROMPT = """\
+You are an expert at identifying key concepts from educational material.
+
+Analyze the following source chunks and extract the {node_count} most important \
+concepts, along with relationships between them.
+
+Requirements:
+- Each concept should be a concise label (1-4 words)
+- Concepts should represent distinct, meaningful ideas from the material
+- Include both high-level themes and specific technical terms
+- Relationships should describe how concepts connect (e.g. "requires", "part of", "leads to")
+- Detect the language of the source material and respond in that same language
+
+Source material:
+{chunks_text}
+
+Respond with ONLY a JSON object in this exact format:
+{{
+  "concepts": [
+    {{"label": "Concept Name", "summary": "One sentence explaining this concept from the sources"}}
+  ],
+  "relationships": [
+    {{"source": "Concept A", "target": "Concept B", "label": "relationship verb"}}
+  ]
+}}
+
+Extract exactly {node_count} concepts and up to {edge_count} relationships.
+"""
+
 
 CANVAS_SYSTEM_PROMPT = """You are a concept map generator for educational material.
 Given source material chunks, generate a structured concept map as JSON.

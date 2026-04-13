@@ -16,6 +16,7 @@ export default function CanvasPage() {
   const {
     notebook,
     sources,
+    selectedSourceIds,
     conceptMap,
     nodes,
     edges,
@@ -33,6 +34,7 @@ export default function CanvasPage() {
 
   const readySources = sources.filter((source) => source.status === 'ready');
   const hasReadySources = readySources.length > 0;
+  const hasSelectedSources = selectedSourceIds.length > 0;
   const focusId = searchParams.get('focusId');
 
   useEffect(() => {
@@ -80,7 +82,7 @@ export default function CanvasPage() {
   }, [conceptMap, edges, focusId, nodes, setSelection]);
 
   async function handleGenerate() {
-    if (!notebook || !hasReadySources) {
+    if (!notebook || !hasSelectedSources) {
       return;
     }
 
@@ -89,7 +91,7 @@ export default function CanvasPage() {
     try {
       const response = await api.conceptMaps.generate(
         notebook.id,
-        readySources.map((source) => source.id),
+        selectedSourceIds,
       ) as ConceptMapEnvelope;
       setConceptGraph(response);
       setSelection(null);
@@ -177,7 +179,7 @@ export default function CanvasPage() {
             id="btn-generate-canvas"
             type="button"
             onClick={() => handleGenerate()}
-            disabled={working}
+            disabled={working || !hasSelectedSources}
             style={{
               justifySelf: 'start',
               padding: '0.7rem 0.95rem',
@@ -186,7 +188,7 @@ export default function CanvasPage() {
               color: '#fff',
               fontSize: '0.82rem',
               fontWeight: 600,
-              opacity: working ? 0.65 : 1,
+              opacity: working || !hasSelectedSources ? 0.65 : 1,
             }}
           >
             {working ? t('knowledgeMapPage.generating') : t('knowledgeMapPage.generateButton')}
