@@ -1,54 +1,61 @@
 @import "tailwindcss";
 
 /*
- * Synthesis Studio — Design System
+ * TinkeTutor V2 — Design System
  *
- * Academic-grade design inspired by NotebookLM.
- * Dark-mode-first, serious typography, subtle premium touches.
- * Per product contract: this is NOT a playful tool. It's a study workspace.
+ * Bright, warm, pedagogical learning space.
+ * Light-mode-first with warm off-white tones and color pops.
+ * Friendly but serious — a place where learning happens collaboratively.
  */
 
 :root {
   /* --- Color System --- */
-  /* Neutral tones — warm slate base */
-  --color-bg-primary: #0a0b0d;
-  --color-bg-secondary: #111318;
-  --color-bg-surface: #16181d;
-  --color-bg-elevated: #1c1f26;
-  --color-bg-hover: #22252e;
+  /* Warm light backgrounds */
+  --color-bg-primary: #f8f6f3;
+  --color-bg-secondary: #ffffff;
+  --color-bg-surface: #f0ede8;
+  --color-bg-elevated: #ffffff;
+  --color-bg-hover: #ece8e1;
 
-  /* Text hierarchy */
-  --color-text-primary: #eaedf3;
-  --color-text-secondary: #9ba3b5;
-  --color-text-tertiary: #636d83;
-  --color-text-muted: #454d61;
+  /* Text hierarchy — dark readable text */
+  --color-text-primary: #1a1a2e;
+  --color-text-secondary: #4a4a6a;
+  --color-text-tertiary: #8a8aa0;
+  --color-text-muted: #b0b0c0;
 
-  /* Brand accent — scholarly indigo */
-  --color-accent-primary: #6366f1;
-  --color-accent-primary-hover: #818cf8;
+  /* Brand accent — warm violet-indigo */
+  --color-accent-primary: #7c6df5;
+  --color-accent-primary-hover: #6a5ce0;
   --color-accent-secondary: #a78bfa;
-  --color-accent-glow: rgba(99, 102, 241, 0.15);
+  --color-accent-glow: rgba(124, 109, 245, 0.1);
+
+  /* Color pops — warm amber/coral for CTAs and highlights */
+  --color-pop-warm: #f59e42;
+  --color-pop-warm-hover: #e88e2e;
+  --color-pop-warm-bg: rgba(245, 158, 66, 0.1);
+  --color-pop-coral: #f06868;
+  --color-pop-coral-bg: rgba(240, 104, 104, 0.08);
 
   /* Semantic colors */
-  --color-success: #34d399;
-  --color-success-bg: rgba(52, 211, 153, 0.12);
-  --color-warning: #fbbf24;
-  --color-warning-bg: rgba(251, 191, 36, 0.12);
-  --color-error: #f87171;
-  --color-error-bg: rgba(248, 113, 113, 0.12);
-  --color-info: #60a5fa;
-  --color-info-bg: rgba(96, 165, 250, 0.12);
+  --color-success: #22c55e;
+  --color-success-bg: rgba(34, 197, 94, 0.1);
+  --color-warning: #f59e42;
+  --color-warning-bg: rgba(245, 158, 66, 0.1);
+  --color-error: #ef4444;
+  --color-error-bg: rgba(239, 68, 68, 0.08);
+  --color-info: #3b82f6;
+  --color-info-bg: rgba(59, 130, 246, 0.08);
 
   /* Canvas node status colors */
-  --color-node-skeleton: #fbbf24;
-  --color-node-filled: #34d399;
-  --color-node-ai: #60a5fa;
+  --color-node-skeleton: #f59e42;
+  --color-node-filled: #22c55e;
+  --color-node-ai: #3b82f6;
   --color-node-verified: #a78bfa;
 
-  /* Borders */
-  --color-border-primary: #1e2230;
-  --color-border-secondary: #2a2f3c;
-  --color-border-accent: rgba(99, 102, 241, 0.3);
+  /* Borders — light, subtle */
+  --color-border-primary: #e5e0d8;
+  --color-border-secondary: #d8d3ca;
+  --color-border-accent: rgba(124, 109, 245, 0.3);
 
   /* --- Typography --- */
   --font-sans: var(--font-inter), system-ui, -apple-system, sans-serif;
@@ -74,10 +81,10 @@
   --transition-base: 250ms cubic-bezier(0.4, 0, 0.2, 1);
   --transition-slow: 400ms cubic-bezier(0.4, 0, 0.2, 1);
 
-  /* --- Shadows --- */
-  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.3);
-  --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.4);
-  --shadow-lg: 0 8px 24px rgba(0, 0, 0, 0.5);
+  /* --- Shadows — soft, warm --- */
+  --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.06);
+  --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.08);
+  --shadow-lg: 0 8px 24px rgba(0, 0, 0, 0.1);
   --shadow-glow: 0 0 20px var(--color-accent-glow);
 
   /* --- Layout --- */
@@ -167,22 +174,140 @@ button {
 /* === Utility Classes === */
 
 .glass {
-  background: rgba(22, 24, 29, 0.8);
+  background: rgba(255, 255, 255, 0.85);
   backdrop-filter: blur(12px);
   border: 1px solid var(--color-border-primary);
 }
 
 .surface {
-  background: var(--color-bg-surface);
+  background: var(--color-bg-elevated);
   border: 1px solid var(--color-border-primary);
   border-radius: var(--radius-lg);
 }
 
 .elevated {
   background: var(--color-bg-elevated);
-  border: 1px solid var(--color-border-secondary);
+  border: 1px solid var(--color-border-primary);
   border-radius: var(--radius-lg);
   box-shadow: var(--shadow-md);
+}
+
+/* === Button Utility Classes === */
+
+.btn-primary {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.375rem;
+  padding: 0.625rem 1.25rem;
+  border-radius: var(--radius-md);
+  background: var(--color-accent-primary);
+  color: #fff;
+  font-size: 0.875rem;
+  font-weight: 600;
+  border: none;
+  cursor: pointer;
+  transition: background var(--transition-fast), box-shadow var(--transition-fast);
+}
+
+.btn-primary:hover {
+  background: var(--color-accent-primary-hover);
+  box-shadow: var(--shadow-md);
+}
+
+.btn-primary:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.btn-secondary {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.375rem;
+  padding: 0.625rem 1.25rem;
+  border-radius: var(--radius-md);
+  background: transparent;
+  color: var(--color-text-secondary);
+  font-size: 0.875rem;
+  font-weight: 500;
+  border: 1px solid var(--color-border-secondary);
+  cursor: pointer;
+  transition: border-color var(--transition-fast), color var(--transition-fast);
+}
+
+.btn-secondary:hover {
+  border-color: var(--color-accent-primary);
+  color: var(--color-accent-primary);
+}
+
+.btn-danger {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.375rem;
+  padding: 0.5rem 0.875rem;
+  border-radius: var(--radius-md);
+  background: var(--color-error-bg);
+  color: var(--color-error);
+  font-size: 0.8125rem;
+  font-weight: 500;
+  border: 1px solid rgba(239, 68, 68, 0.2);
+  cursor: pointer;
+  transition: background var(--transition-fast), border-color var(--transition-fast);
+}
+
+.btn-danger:hover {
+  background: rgba(239, 68, 68, 0.15);
+  border-color: var(--color-error);
+}
+
+/* === Card Interactive === */
+
+.card-interactive {
+  background: var(--color-bg-elevated);
+  border: 1px solid var(--color-border-primary);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-sm);
+  transition: border-color var(--transition-fast), box-shadow var(--transition-fast), transform var(--transition-fast);
+  cursor: pointer;
+}
+
+.card-interactive:hover {
+  border-color: var(--color-accent-primary);
+  box-shadow: var(--shadow-md);
+  transform: translateY(-1px);
+}
+
+/* === Tutor Conversation Area === */
+
+.tutor-conversation-area {
+  background: linear-gradient(180deg, #faf8f5 0%, #f3eff8 100%);
+  border-right: 1px solid var(--color-border-primary);
+}
+
+/* === Confirmation Dialog Overlay === */
+
+.confirmation-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  display: grid;
+  place-items: center;
+  background: rgba(26, 26, 46, 0.4);
+  backdrop-filter: blur(4px);
+  animation: fadeIn var(--transition-fast) ease-out;
+}
+
+.confirmation-dialog {
+  background: var(--color-bg-elevated);
+  border: 1px solid var(--color-border-primary);
+  border-radius: var(--radius-xl);
+  box-shadow: var(--shadow-lg);
+  padding: 1.5rem;
+  max-width: 420px;
+  width: 90vw;
+  animation: slideUp var(--transition-base) ease-out;
 }
 
 /* === Animations === */
@@ -223,9 +348,9 @@ button {
 .skeleton-loading {
   background: linear-gradient(
     90deg,
-    var(--color-bg-elevated) 25%,
+    var(--color-bg-surface) 25%,
     var(--color-bg-hover) 50%,
-    var(--color-bg-elevated) 75%
+    var(--color-bg-surface) 75%
   );
   background-size: 200% 100%;
   animation: skeleton-shimmer 1.5s ease-in-out infinite;

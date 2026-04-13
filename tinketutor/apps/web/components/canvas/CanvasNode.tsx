@@ -88,8 +88,8 @@ export default function CanvasNode({ data: rawData, selected }: NodeProps) {
         border: `1.5px ${data.status === 'skeleton' ? 'dashed' : 'solid'} ${statusStyle.border}`,
         background: statusStyle.background,
         boxShadow: selected
-          ? '0 0 0 1px var(--color-accent-primary), 0 12px 32px rgba(15, 23, 42, 0.16)'
-          : '0 10px 24px rgba(15, 23, 42, 0.08)',
+          ? '0 0 0 2px var(--color-accent-primary), var(--shadow-lg)'
+          : 'var(--shadow-md)',
         color: 'var(--color-text-primary)',
         transition: 'box-shadow 120ms ease, transform 120ms ease',
       }}

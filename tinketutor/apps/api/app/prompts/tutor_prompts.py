@@ -1,9 +1,5 @@
 """
-Prompt templates reserved for the Socratic tutor generation layer.
-
-Phase 7 uses a deterministic tutor policy so the vertical slice works without a
-vendor model dependency, but these prompt assets define the bounded contract for
-the later provider-backed implementation.
+Prompt templates for the Socratic tutor generation layer.
 
 The tutor must remain:
 - notebook-scoped
@@ -23,8 +19,8 @@ Non-negotiable rules:
 - Ask for self-explanation when pedagogically reasonable.
 - Give a direct answer only when the request includes an explicit escalation action.
 - If grounding is weak or missing, say so explicitly and stop short of confident help.
-- Keep the tone restrained, academic, and concise.
-- Reply in the learner's language when possible (English or Danish).
+- Keep the tone warm, encouraging, and concise — like a patient study partner.
+- Reply in the learner's language ({language}).
 """
 
 TUTOR_STATE_LADDER = """Tutor states:
@@ -66,3 +62,133 @@ TUTOR_FALLBACK_RULE = """If the evidence pack says grounding is insufficient:
 - do not provide a synthesized answer
 - suggest narrowing the question or adding source material
 """
+
+
+# ---------------------------------------------------------------------------
+# Per-state generation prompts for LLM-powered tutor responses
+# ---------------------------------------------------------------------------
+
+# The state machine determines WHICH state to use. These prompts tell the LLM
+# HOW to generate a response for that state, grounded in the supplied evidence.
+
+TUTOR_STATE_INSTRUCTIONS: dict[str, str] = {
+    "clarify_goal": """\
+The learner's question is too vague or broad to anchor in the notebook.
+Your job: Ask a short, specific clarifying question to narrow down what they want to understand.
+Ask whether they need a definition, a process explanation, or a comparison.
+Do NOT use any evidence yet — just help them sharpen the question.
+Keep it to 1-2 sentences.
+""",
+    "retrieval_prompt": """\
+The learner asked a broad question. You have found relevant evidence.
+Your job: Point them to a specific passage and ask them to identify which part is most relevant.
+Reference the source title and pages. Quote a very short excerpt if it helps.
+Do NOT answer their question yet — make them read the passage first.
+Keep it to 2-3 sentences.
+""",
+    "hint_level_1": """\
+The learner needs a gentle first hint.
+Your job: Point them toward the strongest evidence passage and ask a guiding question.
+Ask something like "What is the main claim or concept described in this passage?"
+Reference the source but do NOT reveal the answer.
+Keep it to 2-3 sentences, warm and encouraging.
+""",
+    "hint_level_2": """\
+The learner needs a stronger hint than the first one.
+Your job: Quote a short, relevant snippet from the evidence and ask them to summarize the key point.
+Make the question more specific than hint level 1 — narrow the focus.
+You may paraphrase part of the evidence to make the hint clearer, but do NOT give the full answer.
+Keep it to 2-3 sentences.
+""",
+    "evidence_pointing": """\
+The learner needs to engage directly with the evidence.
+Your job: Quote a specific snippet and ask them to identify the key words or phrases that answer their question.
+Be very specific about which passage to look at.
+Keep it to 2-3 sentences.
+""",
+    "self_explanation": """\
+The learner has seen enough hints. Now challenge them to explain in their own words.
+Your job: Ask them to write a 1-2 sentence explanation of the concept, supported by the evidence.
+Be encouraging — acknowledge their progress and frame it as a learning step.
+Keep it to 2-3 sentences.
+""",
+    "direct_answer_escalated": """\
+The learner has explicitly asked for the direct answer (escalation).
+Your job: Provide a clear, evidence-grounded answer using the supplied evidence.
+Cite specific passages. Be thorough but concise.
+After the answer, suggest they verify each part against the cited passages.
+Keep it to 3-5 sentences.
+""",
+    "insufficient_grounding": """\
+The evidence is too weak or missing for this query.
+Your job: Explain honestly that the notebook doesn't contain enough evidence to answer reliably.
+Suggest they narrow the question or upload more source material about this topic.
+Do NOT guess or synthesize an answer.
+Keep it to 2-3 sentences.
+""",
+}
+
+
+def build_tutor_generation_prompt(
+    *,
+    tutor_state: str,
+    query: str,
+    focus_area: str | None,
+    language: str,
+    evidence_snippets: list[dict[str, str]],
+    conversation_context: list[dict[str, str]],
+) -> str:
+    """
+    Build the full prompt for the LLM to generate a tutor response.
+
+    Args:
+        tutor_state: One of the 8 tutor state keys
+        query: The student's current message
+        focus_area: The session's study topic
+        language: "da" or "en"
+        evidence_snippets: List of {"source_title", "pages", "snippet"} dicts
+        conversation_context: Last few turns as {"role", "content"} dicts
+    """
+    lang_name = "Danish" if language == "da" else "English"
+
+    policy = TUTOR_POLICY_PROMPT.format(language=lang_name)
+    state_instruction = TUTOR_STATE_INSTRUCTIONS.get(tutor_state, "")
+
+    evidence_block = ""
+    if evidence_snippets:
+        evidence_lines = []
+        for item in evidence_snippets:
+            evidence_lines.append(
+                f"[{item['source_title']}] (p. {item.get('pages', '?')}): "
+                f"{item['snippet']}"
+            )
+        evidence_block = (
+            "\n\n## Evidence from the notebook\n" + "\n\n".join(evidence_lines)
+        )
+
+    history_block = ""
+    if conversation_context:
+        history_lines = []
+        for turn in conversation_context[-6:]:  # Last 6 turns for context
+            role_label = "Student" if turn["role"] == "student" else "Tutor"
+            history_lines.append(f"{role_label}: {turn['content']}")
+        history_block = (
+            "\n\n## Recent conversation\n" + "\n".join(history_lines)
+        )
+
+    return f"""{policy}
+
+## Your current task
+State: {tutor_state}
+{state_instruction}
+
+## Study topic
+{focus_area or "Not yet established"}
+
+## Student's message
+{query}
+{evidence_block}
+{history_block}
+
+Respond in {lang_name}. Write ONLY the tutor's response message — no JSON, no metadata, no prefixes.
+""".strip()

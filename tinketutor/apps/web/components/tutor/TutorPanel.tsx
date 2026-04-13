@@ -34,6 +34,7 @@ export function TutorPanel({
   focus,
   onFocusChange,
   onWorkspacePaneOpenChange,
+  selectedSourceIds,
 }: {
   notebookId: string;
   /** Workspace passes ready-source metadata; the panel no longer gates on it
@@ -43,6 +44,8 @@ export function TutorPanel({
   focus: WorkspaceFocus;
   onFocusChange: (focus: WorkspaceFocus) => void;
   onWorkspacePaneOpenChange: (open: boolean) => void;
+  /** Selected source IDs to scope tutor sessions to user-chosen sources. */
+  selectedSourceIds?: string[];
 }) {
   const router = useRouter();
   const { uiLocale, responseLocale, t } = useI18n();
@@ -107,7 +110,7 @@ export function TutorPanel({
     event.preventDefault();
     const trimmed = query.trim();
     if (!trimmed) return;
-    await sendQuery(trimmed);
+    await sendQuery(trimmed, { sourceIds: selectedSourceIds });
     if (!controller.error) {
       setQuery('');
     }
@@ -123,8 +126,6 @@ export function TutorPanel({
         citationId,
         resolution,
       });
-      onWorkspacePaneOpenChange(true);
-      router.push(`/workspace/${notebookId}`);
     } catch (err) {
       setError(err instanceof Error ? err.message : t('tutorPanel.citationError'));
     } finally {
@@ -150,7 +151,7 @@ export function TutorPanel({
 
     const focusArea =
       activeFocus.type === 'node' ? activeFocus.node.label : activeFocus.edge.label;
-    await sendQuery(prompt, { focusArea });
+    await sendQuery(prompt, { focusArea, sourceIds: selectedSourceIds });
   }
 
   function handleSuggestedAction(action: TutorSuggestedAction) {

@@ -27,11 +27,18 @@ from app.domain.models import (
     TutorTurn,
 )
 from app.infra.store import new_id, utc_now
+from app.domain.models import GenerationConfig
+from app.prompts.tutor_prompts import build_tutor_generation_prompt
+from app.providers.base import LLMProvider
 from app.providers.embedding import EmbeddingProvider
 from app.providers.reranker import Reranker
 from app.providers.vector_store import VectorStore
 from app.repositories import source_ingestion_repository, tutor_repository
 from app.services import citation_service, notebook_service, search_service
+
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 ENGLISH_DIRECT_ANSWER_PATTERNS = (
@@ -694,7 +701,61 @@ def _next_hint_level(session: TutorSession, tutor_state: TutorState) -> int:
     return session.hint_level
 
 
-def _build_tutor_turn_draft(
+async def _generate_llm_tutor_content(
+    *,
+    llm: LLMProvider,
+    tutor_state: TutorState,
+    query: str,
+    focus_area: str | None,
+    language: Language,
+    evidence_items: list[EvidenceChunk],
+    session: TutorSession,
+) -> str | None:
+    """Call the LLM to generate a contextual tutor response. Returns None on failure."""
+    try:
+        lang_code = "da" if language == Language.DA else "en"
+
+        evidence_snippets = []
+        for item in evidence_items:
+            pages = f"{item.page_start}-{item.page_end}" if item.page_start else "?"
+            evidence_snippets.append({
+                "source_title": item.source_title,
+                "pages": pages,
+                "snippet": _trim_snippet(item.snippet_text, limit=400),
+            })
+
+        # Load recent conversation context
+        conversation_context: list[dict[str, str]] = []
+        recent_turns = tutor_repository.list_turns_for_session(session.id, limit=6)
+        for turn in recent_turns:
+            conversation_context.append({
+                "role": "student" if turn.role == TutorMessageRole.STUDENT else "tutor",
+                "content": turn.content[:300],
+            })
+
+        prompt = build_tutor_generation_prompt(
+            tutor_state=tutor_state.value,
+            query=query,
+            focus_area=focus_area or session.focus_area,
+            language=lang_code,
+            evidence_snippets=evidence_snippets,
+            conversation_context=conversation_context,
+        )
+
+        config = GenerationConfig(
+            temperature=0.6,
+            max_tokens=512,
+        )
+        response = await llm.generate(prompt, evidence_items, config)
+        content = response.content.strip()
+        if content:
+            return content
+    except Exception:
+        logger.warning("LLM tutor generation failed, falling back to template", exc_info=True)
+    return None
+
+
+async def _build_tutor_turn_draft(
     *,
     session: TutorSession,
     query: str,
@@ -702,6 +763,7 @@ def _build_tutor_turn_draft(
     evidence_pack: EvidencePack,
     language: Language,
     is_new_session: bool,
+    llm: LLMProvider | None = None,
 ) -> TutorTurnDraft:
     tutor_state = _determine_tutor_state(
         session=session,
@@ -767,8 +829,22 @@ def _build_tutor_turn_draft(
         )
 
     item = evidence_items[0]
+
+    # --- LLM generation with template fallback ---
+    llm_content: str | None = None
+    if llm is not None:
+        llm_content = await _generate_llm_tutor_content(
+            llm=llm,
+            tutor_state=tutor_state,
+            query=query,
+            focus_area=session.focus_area,
+            language=language,
+            evidence_items=evidence_items,
+            session=session,
+        )
+
     if tutor_state == TutorState.RETRIEVAL_PROMPT:
-        content = _build_retrieval_prompt_text(language, item)
+        content = llm_content or _build_retrieval_prompt_text(language, item)
         message_type = TutorMessageType.QUESTION
         suggested_next_action = (
             "Vælg den del af passagen, du vil starte med."
@@ -776,7 +852,7 @@ def _build_tutor_turn_draft(
             else "Choose the part of the passage you want to start from."
         )
     elif tutor_state == TutorState.HINT_LEVEL_1:
-        content = _build_hint_level_1_text(language, item)
+        content = llm_content or _build_hint_level_1_text(language, item)
         message_type = TutorMessageType.QUESTION
         suggested_next_action = (
             "Svar med den centrale påstand eller proces, du ser i passagen."
@@ -784,7 +860,7 @@ def _build_tutor_turn_draft(
             else "Reply with the central claim or process you see in the passage."
         )
     elif tutor_state == TutorState.HINT_LEVEL_2:
-        content = _build_hint_level_2_text(language, item)
+        content = llm_content or _build_hint_level_2_text(language, item)
         message_type = TutorMessageType.HINT
         suggested_next_action = (
             "Skriv en enkelt sætning, før du beder om mere hjælp."
@@ -792,7 +868,7 @@ def _build_tutor_turn_draft(
             else "Write one sentence before asking for more help."
         )
     elif tutor_state == TutorState.EVIDENCE_POINTING:
-        content = _build_evidence_pointing_text(language, item)
+        content = llm_content or _build_evidence_pointing_text(language, item)
         message_type = TutorMessageType.HINT
         suggested_next_action = (
             "Peg på de ord i passagen, du vil bygge svaret på."
@@ -800,7 +876,7 @@ def _build_tutor_turn_draft(
             else "Point to the words in the passage you want to build from."
         )
     elif tutor_state == TutorState.SELF_EXPLANATION:
-        content = _build_self_explanation_text(language, item)
+        content = llm_content or _build_self_explanation_text(language, item)
         message_type = TutorMessageType.CHALLENGE
         suggested_next_action = (
             "Prøv en kort forklaring med dine egne ord."
@@ -808,7 +884,7 @@ def _build_tutor_turn_draft(
             else "Try a short explanation in your own words."
         )
     else:
-        content = _build_direct_answer_text(language, query, evidence_items)
+        content = llm_content or _build_direct_answer_text(language, query, evidence_items)
         message_type = TutorMessageType.DIRECT_ANSWER
         suggested_next_action = (
             "Brug citaterne til at kontrollere hvert led i forklaringen."
@@ -1107,6 +1183,15 @@ class TutorService:
 
         return session, tutor_turn
 
+    def _get_tutor_llm(self) -> LLMProvider | None:
+        """Lazily create a tutor-role LLM provider. Returns None if unavailable."""
+        try:
+            from app.providers.factory import get_llm_provider
+            return get_llm_provider(role="tutor")
+        except Exception:
+            logger.info("LLM provider not available, using template fallback")
+            return None
+
     async def _record_exchange(
         self,
         *,
@@ -1173,13 +1258,14 @@ class TutorService:
         )
         evidence_pack.diagnostics["retrieval_query"] = retrieval_query
 
-        draft = _build_tutor_turn_draft(
+        draft = await _build_tutor_turn_draft(
             session=session,
             query=cleaned_content,
             user_intent=user_intent,
             evidence_pack=evidence_pack,
             language=language,
             is_new_session=is_new_session,
+            llm=self._get_tutor_llm(),
         )
 
         tutor_turn_id = new_id()

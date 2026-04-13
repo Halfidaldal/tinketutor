@@ -20,7 +20,12 @@
     "evidence": "Evidence",
     "pages": "Pages",
     "loading": "Loading…",
-    "working": "Working…"
+    "working": "Working…",
+    "delete": "Delete",
+    "deleteConfirmTitle": "Confirm deletion",
+    "deleting": "Deleting…",
+    "selectAll": "Select all",
+    "deselectAll": "Deselect all"
   },
   "landing": {
     "headline": "Turn your study materials into an active exam-prep workspace",
@@ -71,7 +76,8 @@
     "sourcesCountOne": "📄 1 source",
     "sourcesCountMany": "📄 {count} sources",
     "notebookFallback": "Notebook",
-    "backToStudyHome": "Back to study home"
+    "backToStudyHome": "Back to study home",
+    "deleteConfirm": "Are you sure you want to delete the notebook '{title}'? All sources and data in it will be deleted."
   },
   "workspace": {
     "back": "Back",
@@ -94,7 +100,16 @@
     "addSource": "+ Add",
     "uploadPrompt": "Upload a PDF, PPTX, or DOCX source to begin processing.",
     "chunksOne": "1 chunk",
-    "chunksMany": "{count} chunks"
+    "chunksMany": "{count} chunks",
+    "hideStudio": "Hide studio",
+    "showStudio": "Show studio",
+    "sourceSidebar": {
+      "title": "Sources",
+      "selectAll": "Select all",
+      "deselectAll": "Deselect all",
+      "uploadHint": "+ Add source",
+      "noSources": "No sources yet"
+    }
   },
   "sourcesPage": {
     "title": "Sources",
@@ -107,7 +122,8 @@
     "uploadingSource": "Uploading source…",
     "dropzoneMeta": "PDF, PPTX, DOCX · up to 50 MB each · {count}/5 sources",
     "uploadFailed": "Upload failed",
-    "emptyGuidance": "Upload at least one processed source before using the knowledge map, tutor flow, or quiz flow."
+    "emptyGuidance": "Upload at least one processed source before using the knowledge map, tutor flow, or quiz flow.",
+    "deleteConfirm": "Are you sure you want to delete the source '{title}'? This cannot be undone."
   },
   "studySupport": {
     "selectedElement": "Selected Element",
@@ -403,7 +419,8 @@
       "defaultStudySpaceName": "Your study space",
       "loading": "Loading your tutor…",
       "loadError": "Failed to load study home",
-      "newStudySpace": "New study space"
+      "newStudySpace": "New study space",
+      "otherSubject": "Other"
     },
     "onboarding": {
       "greetingEmpty": "Hi! Upload your first study material and I'll walk through it with you.",

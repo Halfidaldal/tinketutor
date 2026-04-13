@@ -20,7 +20,12 @@
     "evidence": "Evidens",
     "pages": "Sider",
     "loading": "Indlæser…",
-    "working": "Arbejder…"
+    "working": "Arbejder…",
+    "delete": "Slet",
+    "deleteConfirmTitle": "Bekræft sletning",
+    "deleting": "Sletter…",
+    "selectAll": "Vælg alle",
+    "deselectAll": "Fravælg alle"
   },
   "landing": {
     "headline": "Gør dit studiemateriale til et aktivt eksamensrum",
@@ -71,7 +76,8 @@
     "sourcesCountOne": "📄 1 kilde",
     "sourcesCountMany": "📄 {count} kilder",
     "notebookFallback": "Notesbog",
-    "backToStudyHome": "Tilbage til studiehjem"
+    "backToStudyHome": "Tilbage til studiehjem",
+    "deleteConfirm": "Er du sikker på, at du vil slette notesbogen '{title}'? Alle kilder og data i den vil blive slettet."
   },
   "workspace": {
     "back": "Tilbage",
@@ -94,7 +100,16 @@
     "addSource": "+ Tilføj",
     "uploadPrompt": "Upload en PDF-, PPTX- eller DOCX-kilde for at begynde behandlingen.",
     "chunksOne": "1 chunk",
-    "chunksMany": "{count} chunks"
+    "chunksMany": "{count} chunks",
+    "hideStudio": "Skjul studio",
+    "showStudio": "Vis studio",
+    "sourceSidebar": {
+      "title": "Kilder",
+      "selectAll": "Vælg alle",
+      "deselectAll": "Fravælg alle",
+      "uploadHint": "+ Tilføj kilde",
+      "noSources": "Ingen kilder endnu"
+    }
   },
   "sourcesPage": {
     "title": "Kilder",
@@ -107,7 +122,8 @@
     "uploadingSource": "Uploader kilde…",
     "dropzoneMeta": "PDF, PPTX, DOCX · op til 50 MB hver · {count}/5 kilder",
     "uploadFailed": "Upload mislykkedes",
-    "emptyGuidance": "Upload mindst én behandlet kilde, før du bruger videnkortet, tutorforløbet eller quizforløbet."
+    "emptyGuidance": "Upload mindst én behandlet kilde, før du bruger videnkortet, tutorforløbet eller quizforløbet.",
+    "deleteConfirm": "Er du sikker på, at du vil slette kilden '{title}'? Dette kan ikke fortrydes."
   },
   "studySupport": {
     "selectedElement": "Valgt element",
@@ -403,7 +419,8 @@
       "defaultStudySpaceName": "Din studieplads",
       "loading": "Indlæser din tutor…",
       "loadError": "Kunne ikke indlæse studiehjem",
-      "newStudySpace": "Ny studieplads"
+      "newStudySpace": "Ny studieplads",
+      "otherSubject": "Andet"
     },
     "onboarding": {
       "greetingEmpty": "Hej! Upload dit første studiemateriale, så guider jeg dig igennem det.",

@@ -11,6 +11,8 @@ import {
   useState,
 } from 'react';
 
+import ConfirmDialog from '../../../components/shared/ConfirmDialog';
+import SourceSidebar from '../../../components/workspace/SourceSidebar';
 import TutorPanel from '../../../components/tutor/TutorPanel';
 import { api } from '../../../lib/api';
 import type {
@@ -53,54 +55,59 @@ interface NotebookData {
 interface WorkspaceState {
   notebook: NotebookData | null;
   sources: Source[];
+  selectedSourceIds: string[];
   conceptMap: ConceptMapDTO | null;
   nodes: ConceptNodeDTO[];
   edges: ConceptEdgeDTO[];
   focus: WorkspaceFocus;
   selection: CanvasSelectionContext;
-  workspacePaneOpen: boolean;
+  studioPaneOpen: boolean;
   loading: boolean;
   error: string | null;
   refreshSources: () => Promise<void>;
   refreshWorkspace: () => Promise<void>;
   setFocus: (focus: WorkspaceFocus) => void;
   setSelection: (selection: CanvasSelectionContext) => void;
-  setWorkspacePaneOpen: (open: boolean) => void;
+  setStudioPaneOpen: (open: boolean) => void;
   setConceptGraph: (graph: ConceptMapEnvelope | null) => void;
   updateNodeInWorkspace: (node: ConceptNodeDTO) => void;
   updateEdgeInWorkspace: (edge: ConceptEdgeDTO) => void;
+  toggleSourceSelection: (id: string) => void;
+  setSelectedSourceIds: (ids: string[]) => void;
 }
 
 const WorkspaceContext = createContext<WorkspaceState>({
   notebook: null,
   sources: [],
+  selectedSourceIds: [],
   conceptMap: null,
   nodes: [],
   edges: [],
   focus: null,
   selection: null,
-  workspacePaneOpen: true,
+  studioPaneOpen: true,
   loading: true,
   error: null,
   refreshSources: async () => {},
   refreshWorkspace: async () => {},
   setFocus: () => {},
   setSelection: () => {},
-  setWorkspacePaneOpen: () => {},
+  setStudioPaneOpen: () => {},
   setConceptGraph: () => {},
   updateNodeInWorkspace: () => {},
   updateEdgeInWorkspace: () => {},
+  toggleSourceSelection: () => {},
+  setSelectedSourceIds: () => {},
 });
 
 export function useWorkspace() {
   return useContext(WorkspaceContext);
 }
 
-const WORKSPACE_TABS = [
-  { id: 'sources', labelKey: 'workspace.tabs.sources', icon: '📄', href: '' },
-  { id: 'canvas', labelKey: 'workspace.tabs.knowledgeMap', icon: '🧠', href: '/canvas' },
-  { id: 'quiz', labelKey: 'workspace.tabs.quiz', icon: '📝', href: '/quiz' },
-  { id: 'gaps', labelKey: 'workspace.tabs.gaps', icon: '🔍', href: '/gaps' },
+const STUDIO_TABS = [
+  { id: 'canvas', labelKey: 'workspace.tabs.knowledgeMap', icon: '\uD83E\uDDE0', href: '/canvas' },
+  { id: 'quiz', labelKey: 'workspace.tabs.quiz', icon: '\uD83D\uDCDD', href: '/quiz' },
+  { id: 'gaps', labelKey: 'workspace.tabs.gaps', icon: '\uD83D\uDD0D', href: '/gaps' },
 ] as const;
 
 export default function WorkspaceLayout({ children }: { children: React.ReactNode }) {
@@ -114,13 +121,15 @@ export default function WorkspaceLayout({ children }: { children: React.ReactNod
 
   const [notebook, setNotebook] = useState<NotebookData | null>(null);
   const [sources, setSources] = useState<Source[]>([]);
+  const [selectedSourceIds, setSelectedSourceIds] = useState<string[]>([]);
   const [conceptMap, setConceptMap] = useState<ConceptMapDTO | null>(null);
   const [nodes, setNodes] = useState<ConceptNodeDTO[]>([]);
   const [edges, setEdges] = useState<ConceptEdgeDTO[]>([]);
   const [focus, setFocus] = useState<WorkspaceFocus>(null);
-  const [workspacePaneOpen, setWorkspacePaneOpen] = useState(true);
+  const [studioPaneOpen, setStudioPaneOpen] = useState(true);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [sourceDeleteTarget, setSourceDeleteTarget] = useState<Source | null>(null);
 
   const selection = useMemo(() => toCanvasSelection(focus), [focus]);
   const hasActiveSourceProcessing = sources.some(
@@ -153,6 +162,12 @@ export default function WorkspaceLayout({ children }: { children: React.ReactNod
     });
   }, [conceptMap, nodes]);
 
+  const toggleSourceSelection = useCallback((id: string) => {
+    setSelectedSourceIds((current) =>
+      current.includes(id) ? current.filter((sid) => sid !== id) : [...current, id],
+    );
+  }, []);
+
   const fetchNotebook = useCallback(async (showLoading = true) => {
     try {
       if (showLoading) {
@@ -168,6 +183,16 @@ export default function WorkspaceLayout({ children }: { children: React.ReactNod
       };
       setNotebook(data.notebook);
       setSources(data.sources);
+
+      // Auto-select newly ready sources
+      setSelectedSourceIds((prev) => {
+        const readyIds = data.sources.filter((s) => s.status === 'ready').map((s) => s.id);
+        if (prev.length === 0) return readyIds;
+        const existingValid = prev.filter((id) => readyIds.includes(id));
+        const newReady = readyIds.filter((id) => !prev.includes(id));
+        return [...existingValid, ...newReady];
+      });
+
       applyWorkspaceGraph(
         data.concept_map
           ? { concept_map: data.concept_map, nodes: data.nodes, edges: data.edges }
@@ -209,12 +234,34 @@ export default function WorkspaceLayout({ children }: { children: React.ReactNod
   }, [hasActiveSourceProcessing, isAuthenticated, refreshWorkspace]);
 
   const activeTab = useMemo(() => {
-    if (pathname === basePath || pathname === `${basePath}/sources`) {
-      return 'sources';
-    }
-
-    return WORKSPACE_TABS.find((tab) => pathname === `${basePath}${tab.href}`)?.id || 'sources';
+    return STUDIO_TABS.find((tab) => pathname === `${basePath}${tab.href}`)?.id || 'canvas';
   }, [basePath, pathname]);
+
+  async function handleSourceUpload(file: File) {
+    if (!notebook) return;
+    const formData = new FormData();
+    formData.append('file', file);
+    formData.append('title', file.name.replace(/\.[^/.]+$/, ''));
+    formData.append('notebookId', notebook.id);
+    await api.sources.upload(formData);
+    await refreshSources();
+  }
+
+  async function handleDeleteSource(sourceId: string) {
+    const source = sources.find((s) => s.id === sourceId);
+    if (source) setSourceDeleteTarget(source);
+  }
+
+  async function confirmDeleteSource() {
+    if (!sourceDeleteTarget) return;
+    try {
+      await api.sources.delete(sourceDeleteTarget.id);
+      setSelectedSourceIds((prev) => prev.filter((id) => id !== sourceDeleteTarget.id));
+      await refreshSources();
+    } finally {
+      setSourceDeleteTarget(null);
+    }
+  }
 
   if (authLoading || !user || loading) {
     return (
@@ -247,20 +294,9 @@ export default function WorkspaceLayout({ children }: { children: React.ReactNod
         }}
       >
         <div className="surface" style={{ padding: '2rem', textAlign: 'center', maxWidth: 400 }}>
-          <div style={{ fontSize: '2rem', marginBottom: '0.75rem' }}>⚠️</div>
           <p style={{ color: 'var(--color-error)', marginBottom: '1rem' }}>{error}</p>
-          <Link
-            href="/dashboard"
-            style={{
-              padding: '0.5rem 1rem',
-              background: 'var(--color-accent-primary)',
-              color: '#fff',
-              borderRadius: 'var(--radius-md)',
-              fontSize: '0.875rem',
-              textDecoration: 'none',
-            }}
-          >
-            Back to Dashboard
+          <Link href="/study" className="btn-primary" style={{ textDecoration: 'none' }}>
+            {t('workspace.back')}
           </Link>
         </div>
       </div>
@@ -272,26 +308,29 @@ export default function WorkspaceLayout({ children }: { children: React.ReactNod
       value={{
         notebook,
         sources,
+        selectedSourceIds,
         conceptMap,
         nodes,
         edges,
         focus,
         selection,
-        workspacePaneOpen,
+        studioPaneOpen,
         loading,
         error,
         refreshSources,
         refreshWorkspace,
         setFocus,
         setSelection: (nextSelection) => setFocus(nextSelection),
-        setWorkspacePaneOpen,
+        setStudioPaneOpen,
         setConceptGraph: applyWorkspaceGraph,
         updateNodeInWorkspace,
         updateEdgeInWorkspace,
+        toggleSourceSelection,
+        setSelectedSourceIds,
       }}
     >
       <div
-        className={`workspace-shell ${workspacePaneOpen ? 'workspace-open' : 'workspace-closed'}`}
+        className={`workspace-shell ${studioPaneOpen ? 'studio-open' : 'studio-closed'}`}
         style={{
           height: '100vh',
           display: 'flex',
@@ -300,6 +339,7 @@ export default function WorkspaceLayout({ children }: { children: React.ReactNod
           overflow: 'hidden',
         }}
       >
+        {/* Header */}
         <header
           className="glass"
           style={{
@@ -315,7 +355,7 @@ export default function WorkspaceLayout({ children }: { children: React.ReactNod
         >
           <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', minWidth: 0 }}>
             <Link
-              href="/dashboard"
+              href="/study"
               style={{
                 color: 'var(--color-text-tertiary)',
                 fontSize: '0.8125rem',
@@ -326,7 +366,7 @@ export default function WorkspaceLayout({ children }: { children: React.ReactNod
                 whiteSpace: 'nowrap',
               }}
             >
-              ← {t('workspace.back')}
+              \u2190 {t('workspace.back')}
             </Link>
             <span style={{ color: 'var(--color-border-secondary)', fontSize: '0.875rem' }}>|</span>
             <div style={{ minWidth: 0, display: 'grid', gap: '0.1rem' }}>
@@ -362,17 +402,11 @@ export default function WorkspaceLayout({ children }: { children: React.ReactNod
           <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', flexShrink: 0 }}>
             <button
               type="button"
-              onClick={() => setWorkspacePaneOpen((current) => !current)}
-              style={{
-                padding: '0.4rem 0.7rem',
-                borderRadius: 'var(--radius-md)',
-                border: '1px solid var(--color-border-secondary)',
-                background: 'transparent',
-                color: 'var(--color-text-secondary)',
-                fontSize: '0.75rem',
-              }}
+              className="btn-secondary"
+              onClick={() => setStudioPaneOpen((current) => !current)}
+              style={{ padding: '0.4rem 0.7rem', fontSize: '0.75rem' }}
             >
-              {workspacePaneOpen ? t('workspace.hideWorkspacePane') : t('workspace.showWorkspacePane')}
+              {studioPaneOpen ? t('workspace.hideStudio') : t('workspace.showStudio')}
             </button>
             <span style={{ fontSize: '0.75rem', color: 'var(--color-text-tertiary)' }}>
               {user.displayName || user.email}
@@ -394,8 +428,25 @@ export default function WorkspaceLayout({ children }: { children: React.ReactNod
           </div>
         </header>
 
+        {/* 3-column body */}
         <div className="workspace-body">
-          <aside className="tutor-pane">
+          {/* Left: Source sidebar */}
+          <aside className="source-sidebar">
+            <SourceSidebar
+              sources={sources}
+              selectedSourceIds={selectedSourceIds}
+              onToggleSource={toggleSourceSelection}
+              onSelectAll={() => setSelectedSourceIds(sources.filter((s) => s.status === 'ready').map((s) => s.id))}
+              onDeselectAll={() => setSelectedSourceIds([])}
+              focus={focus}
+              onFocusChange={setFocus}
+              onUpload={handleSourceUpload}
+              onDeleteSource={handleDeleteSource}
+            />
+          </aside>
+
+          {/* Center: Tutor */}
+          <main className="tutor-main tutor-conversation-area">
             <TutorPanel
               notebookId={notebookId}
               sources={sources.map((source) => ({
@@ -405,13 +456,15 @@ export default function WorkspaceLayout({ children }: { children: React.ReactNod
               }))}
               focus={focus}
               onFocusChange={setFocus}
-              onWorkspacePaneOpenChange={setWorkspacePaneOpen}
+              onWorkspacePaneOpenChange={setStudioPaneOpen}
+              selectedSourceIds={selectedSourceIds}
             />
-          </aside>
+          </main>
 
-          <section className="workspace-pane">
+          {/* Right: Studio panel */}
+          <section className="studio-panel">
             <div
-              className="workspace-pane-header glass"
+              className="studio-panel-header glass"
               style={{
                 display: 'flex',
                 alignItems: 'center',
@@ -423,7 +476,7 @@ export default function WorkspaceLayout({ children }: { children: React.ReactNod
               }}
             >
               <nav style={{ display: 'flex', gap: '0.125rem', flexWrap: 'wrap' }}>
-                {WORKSPACE_TABS.map((tab) => {
+                {STUDIO_TABS.map((tab) => {
                   const isActive = activeTab === tab.id;
                   return (
                     <Link
@@ -452,12 +505,22 @@ export default function WorkspaceLayout({ children }: { children: React.ReactNod
               </nav>
             </div>
 
-            <div className="workspace-pane-body">
+            <div className="studio-panel-body">
               {children}
             </div>
           </section>
         </div>
       </div>
+
+      {/* Source delete confirmation */}
+      <ConfirmDialog
+        open={!!sourceDeleteTarget}
+        title={t('common.deleteConfirmTitle')}
+        message={sourceDeleteTarget ? t('sourcesPage.deleteConfirm', { values: { title: sourceDeleteTarget.title } }) : ''}
+        onConfirm={() => void confirmDeleteSource()}
+        onCancel={() => setSourceDeleteTarget(null)}
+        variant="danger"
+      />
 
       <style jsx>{`
         .workspace-body {
@@ -467,49 +530,52 @@ export default function WorkspaceLayout({ children }: { children: React.ReactNod
           overflow: hidden;
         }
 
-        .tutor-pane {
-          flex: 0 0 45%;
-          min-width: 340px;
-          max-width: 42rem;
+        .source-sidebar {
+          flex: 0 0 240px;
           min-height: 0;
           background: var(--color-bg-secondary);
           border-right: 1px solid var(--color-border-primary);
-          transition:
-            flex-basis var(--transition-slow),
-            max-width var(--transition-slow),
-            border-color var(--transition-fast);
+          overflow: hidden;
+          transition: flex-basis var(--transition-slow), max-width var(--transition-slow);
         }
 
-        .workspace-pane {
-          flex: 1 1 0%;
+        .tutor-main {
+          flex: 1 1 auto;
+          min-width: 320px;
+          min-height: 0;
+          overflow: hidden;
+        }
+
+        .studio-panel {
+          flex: 0 0 45%;
+          max-width: 52rem;
           min-width: 0;
           min-height: 0;
-          max-width: 100%;
           display: flex;
           flex-direction: column;
-          background: var(--color-bg-primary);
+          background: var(--color-bg-secondary);
+          border-left: 1px solid var(--color-border-primary);
           opacity: 1;
           transform: translateX(0);
           overflow: hidden;
           transition:
             max-width var(--transition-slow),
+            flex-basis var(--transition-slow),
             opacity var(--transition-slow),
-            transform var(--transition-slow),
-            border-color var(--transition-fast);
+            transform var(--transition-slow);
         }
 
-        .workspace-pane-body {
+        .studio-panel-body {
           flex: 1;
           min-height: 0;
           overflow: auto;
         }
 
-        .workspace-shell.workspace-closed .tutor-pane {
+        .workspace-shell.studio-closed .tutor-main {
           flex: 1 1 auto;
-          max-width: none;
         }
 
-        .workspace-shell.workspace-closed .workspace-pane {
+        .workspace-shell.studio-closed .studio-panel {
           flex: 0 0 0%;
           max-width: 0;
           opacity: 0;
@@ -522,22 +588,35 @@ export default function WorkspaceLayout({ children }: { children: React.ReactNod
             flex-direction: column;
           }
 
-          .tutor-pane {
+          .source-sidebar {
             flex: 0 0 auto;
-            min-width: 0;
-            max-width: none;
+            max-height: 180px;
             border-right: none;
             border-bottom: 1px solid var(--color-border-primary);
           }
 
-          .workspace-pane {
-            border-left: none;
-            max-height: 100%;
+          .tutor-main {
+            min-width: 0;
+            flex: 1 1 auto;
           }
 
-          .workspace-shell.workspace-closed .workspace-pane {
+          .studio-panel {
+            flex: 0 0 auto;
+            max-width: none;
+            border-left: none;
+            border-top: 1px solid var(--color-border-primary);
+            max-height: 50%;
+          }
+
+          .workspace-shell.studio-closed .studio-panel {
             max-height: 0;
             transform: translateY(12px);
+          }
+        }
+
+        @media (max-width: 768px) {
+          .source-sidebar {
+            max-height: 140px;
           }
         }
       `}</style>
