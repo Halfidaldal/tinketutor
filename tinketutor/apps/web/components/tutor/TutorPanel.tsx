@@ -1,6 +1,6 @@
 'use client';
 
-import { FormEvent, useCallback, useState } from 'react';
+import { FormEvent, useCallback, useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 
 import { api } from '../../lib/api';
@@ -51,6 +51,7 @@ export function TutorPanel({
   const { uiLocale, responseLocale, t } = useI18n();
   const [query, setQuery] = useState('');
   const [citationLoading, setCitationLoading] = useState(false);
+  const scrollRef = useRef<HTMLDivElement>(null);
 
   const controller = useTutorSessionController({
     notebookId,
@@ -82,6 +83,14 @@ export function TutorPanel({
     reset,
     setError,
   } = controller;
+
+  // Auto-scroll to bottom when new turns arrive
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (el) {
+      el.scrollTop = el.scrollHeight;
+    }
+  }, [turns]);
 
   const activeFocus = focus && focus.type !== 'citation' ? focus : null;
   const progressCount = session?.message_count ?? 0;
@@ -259,13 +268,15 @@ export function TutorPanel({
       </div>
 
       <div
+        ref={scrollRef}
+        className="tutor-conversation-area"
         style={{
           flex: 1,
           minHeight: 0,
           overflow: 'auto',
-          padding: '1rem',
+          padding: '1.25rem',
           display: 'grid',
-          gap: '0.75rem',
+          gap: '0.875rem',
         }}
       >
         {loading && (
@@ -522,13 +533,9 @@ export function TutorPanel({
           <button
             type="submit"
             disabled={submitting || !query.trim()}
+            className="btn-cta"
             style={{
-              padding: '0.625rem 0.875rem',
-              borderRadius: 'var(--radius-md)',
-              background: 'var(--color-accent-primary)',
-              color: '#fff',
-              fontSize: '0.8125rem',
-              fontWeight: 600,
+              width: '100%',
               opacity: submitting || !query.trim() ? 0.6 : 1,
             }}
           >

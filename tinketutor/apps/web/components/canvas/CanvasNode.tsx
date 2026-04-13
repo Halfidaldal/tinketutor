@@ -3,7 +3,6 @@
 import { Handle, NodeProps, Position } from '@xyflow/react';
 
 import type { EvidenceSupport, NodeStatus } from '../../lib/concept-map';
-import { useI18n } from '../../lib/i18n';
 
 export interface CanvasFlowNodeData extends Record<string, unknown> {
   label: string;
@@ -14,84 +13,47 @@ export interface CanvasFlowNodeData extends Record<string, unknown> {
   uncertain: boolean;
   needsRefinement: boolean;
   citationCount: number;
+  hasChildren: boolean;
+  expanded: boolean;
+  onToggleExpand?: (nodeId: string) => void;
+  nodeId: string;
 }
 
-const SUPPORT_STYLE: Record<EvidenceSupport, { border: string; background: string; badge: string; badgeBg: string }> = {
-  strong: {
-    border: 'var(--color-success)',
-    background: 'color-mix(in srgb, var(--color-success) 8%, var(--color-bg-elevated))',
-    badge: 'var(--color-success)',
-    badgeBg: 'var(--color-success-bg)',
-  },
-  partial: {
-    border: 'var(--color-warning)',
-    background: 'color-mix(in srgb, var(--color-warning) 8%, var(--color-bg-elevated))',
-    badge: 'var(--color-warning)',
-    badgeBg: 'var(--color-warning-bg)',
-  },
-  weak: {
-    border: 'var(--color-error)',
-    background: 'color-mix(in srgb, var(--color-error) 6%, var(--color-bg-elevated))',
-    badge: 'var(--color-error)',
-    badgeBg: 'var(--color-error-bg)',
-  },
+const SUPPORT_DOT: Record<EvidenceSupport, string> = {
+  strong: 'var(--color-success)',
+  partial: 'var(--color-warning)',
+  weak: 'var(--color-error)',
 };
 
-const STATUS_STYLE: Record<NodeStatus, { border: string; background: string; pillBg: string; pillColor: string; label: string }> = {
-  skeleton: {
-    border: 'var(--color-node-skeleton)',
-    background: 'color-mix(in srgb, var(--color-node-skeleton) 10%, var(--color-bg-elevated))',
-    pillBg: 'var(--color-warning-bg)',
-    pillColor: 'var(--color-warning)',
-    label: 'Fill in',
-  },
-  student_filled: {
-    border: 'var(--color-node-filled)',
-    background: 'color-mix(in srgb, var(--color-node-filled) 10%, var(--color-bg-elevated))',
-    pillBg: 'var(--color-success-bg)',
-    pillColor: 'var(--color-success)',
-    label: 'Student filled',
-  },
-  ai_generated: {
-    border: 'var(--color-node-ai)',
-    background: 'color-mix(in srgb, var(--color-node-ai) 7%, var(--color-bg-elevated))',
-    pillBg: 'var(--color-accent-glow)',
-    pillColor: 'var(--color-accent-primary)',
-    label: 'AI generated',
-  },
-  verified: {
-    border: 'var(--color-node-verified)',
-    background: 'color-mix(in srgb, var(--color-node-verified) 9%, var(--color-bg-elevated))',
-    pillBg: 'color-mix(in srgb, var(--color-node-verified) 18%, white)',
-    pillColor: 'var(--color-node-verified)',
-    label: 'Verified',
-  },
+const STATUS_BG: Record<NodeStatus, string> = {
+  skeleton: 'var(--color-warning-bg)',
+  student_filled: 'var(--color-success-bg)',
+  ai_generated: 'var(--color-accent-glow)',
+  verified: 'color-mix(in srgb, var(--color-node-verified) 12%, var(--color-bg-elevated))',
 };
 
 export default function CanvasNode({ data: rawData, selected }: NodeProps) {
-  const { t } = useI18n();
   const data = rawData as CanvasFlowNodeData;
-  const supportStyle = SUPPORT_STYLE[data.support];
-  const statusStyle = STATUS_STYLE[data.status];
-  const bodyCopy = data.status === 'skeleton'
-    ? data.guidingQuestion || t('knowledgeMapNode.completePrompt')
-    : data.summary || t('knowledgeMapNode.refinePrompt');
-  const supportLabel = data.uncertain ? t('knowledgeMapNode.tentativeGrounding') : t('knowledgeMapNode.grounded');
+  const dotColor = SUPPORT_DOT[data.support];
+  const bg = STATUS_BG[data.status];
 
   return (
     <div
       style={{
-        minWidth: 220,
-        maxWidth: 280,
-        padding: '0.9rem 1rem',
-        borderRadius: 18,
-        border: `1.5px ${data.status === 'skeleton' ? 'dashed' : 'solid'} ${statusStyle.border}`,
-        background: statusStyle.background,
+        display: 'inline-flex',
+        alignItems: 'center',
+        gap: '0.5rem',
+        padding: '0.5rem 0.75rem',
+        borderRadius: 'var(--radius-full)',
+        border: `1.5px solid ${selected ? 'var(--color-accent-primary)' : 'var(--color-border-secondary)'}`,
+        background: selected ? 'var(--color-accent-glow)' : bg,
         boxShadow: selected
-          ? '0 0 0 2px var(--color-accent-primary), var(--shadow-lg)'
-          : 'var(--shadow-md)',
-        color: 'var(--color-text-primary)',
-        transition: 'box-shadow 120ms ease, transform 120ms ease',
+          ? '0 0 0 2px var(--color-accent-primary), var(--shadow-md)'
+          : 'var(--shadow-sm)',
+        cursor: 'pointer',
+        transition: 'box-shadow 120ms ease, border-color 120ms ease, background 120ms ease',
+        maxWidth: 220,
+        minWidth: 0,
       }}
     >
       <Handle
@@ -102,72 +64,60 @@ export default function CanvasNode({ data: rawData, selected }: NodeProps) {
         style={{ opacity: 0, pointerEvents: 'none' }}
       />
 
-      <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: '0.75rem', marginBottom: '0.55rem' }}>
-        <div style={{ display: 'grid', gap: '0.35rem' }}>
-          <div
-            style={{
-              display: 'inline-flex',
-              alignItems: 'center',
-              width: 'fit-content',
-              padding: '0.15rem 0.45rem',
-              borderRadius: 999,
-              background: statusStyle.pillBg,
-              color: statusStyle.pillColor,
-              fontSize: '0.62rem',
-              fontWeight: 700,
-              letterSpacing: '0.05em',
-              textTransform: 'uppercase',
-            }}
-          >
-            {data.status === 'skeleton'
-              ? t('knowledgeMapNode.fillIn')
-              : data.status === 'student_filled'
-                ? t('knowledgeMapNode.studentFilled')
-                : data.status === 'ai_generated'
-                  ? t('knowledgeMapNode.aiGenerated')
-                  : t('knowledgeMapNode.verified')}
-          </div>
-          <div style={{ fontSize: '0.84rem', fontWeight: 700, lineHeight: 1.35 }}>
-            {data.label}
-          </div>
-        </div>
-        <div
+      {/* Support dot */}
+      <div
+        style={{
+          width: 8,
+          height: 8,
+          borderRadius: '50%',
+          background: dotColor,
+          flexShrink: 0,
+        }}
+      />
+
+      {/* Label */}
+      <span
+        style={{
+          fontSize: '0.8125rem',
+          fontWeight: 600,
+          color: 'var(--color-text-primary)',
+          lineHeight: 1.3,
+          overflow: 'hidden',
+          textOverflow: 'ellipsis',
+          whiteSpace: 'nowrap',
+        }}
+      >
+        {data.label}
+      </span>
+
+      {/* Expand/collapse chevron */}
+      {data.hasChildren && (
+        <button
+          type="button"
+          onClick={(e) => {
+            e.stopPropagation();
+            data.onToggleExpand?.(data.nodeId);
+          }}
           style={{
-            padding: '0.15rem 0.45rem',
-            borderRadius: 999,
-            background: data.uncertain ? 'var(--color-warning-bg)' : supportStyle.badgeBg,
-            color: data.uncertain ? 'var(--color-warning)' : supportStyle.badge,
-            fontSize: '0.65rem',
-            fontWeight: 700,
-            letterSpacing: '0.04em',
-            textTransform: 'uppercase',
-            whiteSpace: 'nowrap',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            width: 20,
+            height: 20,
+            borderRadius: '50%',
+            background: 'var(--color-bg-surface)',
+            border: '1px solid var(--color-border-primary)',
+            fontSize: '0.6875rem',
+            color: 'var(--color-text-tertiary)',
+            flexShrink: 0,
+            cursor: 'pointer',
+            transition: 'transform 150ms ease',
+            transform: data.expanded ? 'rotate(90deg)' : 'rotate(0deg)',
           }}
         >
-          {supportLabel}
-        </div>
-      </div>
-
-      <div style={{ fontSize: '0.74rem', lineHeight: 1.55, color: 'var(--color-text-secondary)' }}>
-        {bodyCopy}
-      </div>
-
-      <div style={{ marginTop: '0.7rem', display: 'flex', justifyContent: 'space-between', gap: '0.75rem', fontSize: '0.68rem', color: 'var(--color-text-tertiary)' }}>
-        <span>
-          {data.status === 'skeleton'
-            ? t('knowledgeMapNode.awaitingCompletion')
-            : data.status === 'student_filled'
-              ? t('knowledgeMapNode.completedInInspector')
-              : data.needsRefinement
-                ? t('knowledgeMapNode.needsRefinement')
-                : t('knowledgeMapNode.groundedConcept')}
-        </span>
-        <span>
-          {data.citationCount === 1
-            ? t('knowledgeMapNode.citationsOne')
-            : t('knowledgeMapNode.citationsMany', { values: { count: data.citationCount } })}
-        </span>
-      </div>
+          ›
+        </button>
+      )}
 
       <Handle
         id="source"

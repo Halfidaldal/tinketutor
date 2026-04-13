@@ -23,11 +23,11 @@
   --color-text-tertiary: #8a8aa0;
   --color-text-muted: #b0b0c0;
 
-  /* Brand accent — warm violet-indigo */
-  --color-accent-primary: #7c6df5;
-  --color-accent-primary-hover: #6a5ce0;
-  --color-accent-secondary: #a78bfa;
-  --color-accent-glow: rgba(124, 109, 245, 0.1);
+  /* Brand accent — warm teal/ocean */
+  --color-accent-primary: #0d9488;
+  --color-accent-primary-hover: #0f766e;
+  --color-accent-secondary: #2dd4bf;
+  --color-accent-glow: rgba(13, 148, 136, 0.10);
 
   /* Color pops — warm amber/coral for CTAs and highlights */
   --color-pop-warm: #f59e42;
@@ -50,12 +50,12 @@
   --color-node-skeleton: #f59e42;
   --color-node-filled: #22c55e;
   --color-node-ai: #3b82f6;
-  --color-node-verified: #a78bfa;
+  --color-node-verified: #2dd4bf;
 
   /* Borders — light, subtle */
   --color-border-primary: #e5e0d8;
   --color-border-secondary: #d8d3ca;
-  --color-border-accent: rgba(124, 109, 245, 0.3);
+  --color-border-accent: rgba(13, 148, 136, 0.30);
 
   /* --- Typography --- */
   --font-sans: var(--font-inter), system-ui, -apple-system, sans-serif;
@@ -199,25 +199,29 @@ button {
   align-items: center;
   justify-content: center;
   gap: 0.375rem;
-  padding: 0.625rem 1.25rem;
+  padding: 0.75rem 1.5rem;
   border-radius: var(--radius-md);
   background: var(--color-accent-primary);
   color: #fff;
   font-size: 0.875rem;
   font-weight: 600;
   border: none;
+  border-bottom: 2px solid rgba(0, 0, 0, 0.15);
+  box-shadow: var(--shadow-sm);
   cursor: pointer;
-  transition: background var(--transition-fast), box-shadow var(--transition-fast);
+  transition: background var(--transition-fast), box-shadow var(--transition-fast), transform var(--transition-fast);
 }
 
 .btn-primary:hover {
   background: var(--color-accent-primary-hover);
   box-shadow: var(--shadow-md);
+  transform: translateY(-1px);
 }
 
 .btn-primary:disabled {
   opacity: 0.5;
   cursor: not-allowed;
+  transform: none;
 }
 
 .btn-secondary {
@@ -268,21 +272,52 @@ button {
   background: var(--color-bg-elevated);
   border: 1px solid var(--color-border-primary);
   border-radius: var(--radius-lg);
-  box-shadow: var(--shadow-sm);
+  box-shadow: var(--shadow-md);
   transition: border-color var(--transition-fast), box-shadow var(--transition-fast), transform var(--transition-fast);
   cursor: pointer;
 }
 
 .card-interactive:hover {
   border-color: var(--color-accent-primary);
-  box-shadow: var(--shadow-md);
+  box-shadow: var(--shadow-lg);
+  transform: translateY(-2px) scale(1.01);
+}
+
+/* High-priority CTA button — warm amber, high visibility */
+.btn-cta {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.375rem;
+  padding: 0.75rem 1.5rem;
+  border-radius: var(--radius-md);
+  background: var(--color-pop-warm);
+  color: #fff;
+  font-size: 0.9375rem;
+  font-weight: 700;
+  border: none;
+  border-bottom: 2px solid rgba(0, 0, 0, 0.15);
+  box-shadow: 0 2px 8px rgba(245, 158, 66, 0.3);
+  cursor: pointer;
+  transition: background var(--transition-fast), box-shadow var(--transition-fast), transform var(--transition-fast);
+}
+
+.btn-cta:hover {
+  background: var(--color-pop-warm-hover);
+  box-shadow: 0 4px 14px rgba(245, 158, 66, 0.4);
   transform: translateY(-1px);
+}
+
+.btn-cta:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  transform: none;
 }
 
 /* === Tutor Conversation Area === */
 
 .tutor-conversation-area {
-  background: linear-gradient(180deg, #faf8f5 0%, #f3eff8 100%);
+  background: linear-gradient(180deg, #faf8f5 0%, #f0faf8 100%);
   border-right: 1px solid var(--color-border-primary);
 }
 

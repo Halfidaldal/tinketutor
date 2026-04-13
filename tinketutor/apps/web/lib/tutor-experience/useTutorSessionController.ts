@@ -140,10 +140,14 @@ export function useTutorSessionController(
         turn: TutorTurn;
       };
       if (cancelledRef.current) return;
-      // Replace turn history with the bootstrap turn so refreshes don't
-      // accumulate duplicate greetings in local state.
       setSession(envelope.session);
-      setTurns([envelope.turn]);
+      // If the session already has history (returning user), fetch full turns.
+      // Otherwise just show the bootstrap greeting.
+      if (envelope.session.message_count > 1) {
+        await loadSession(envelope.session.id);
+      } else {
+        setTurns([envelope.turn]);
+      }
     } catch (err) {
       if (cancelledRef.current) return;
       setError(err instanceof Error ? err.message : translateError('loadSession'));
@@ -152,7 +156,7 @@ export function useTutorSessionController(
         setLoading(false);
       }
     }
-  }, [notebookId, locales, translateError]);
+  }, [notebookId, locales, translateError, loadSession]);
 
   useEffect(() => {
     if (autoBootstrap && !initialSession) {

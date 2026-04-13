@@ -405,6 +405,26 @@
     "openInKnowledgeMap": "Open in knowledge map",
     "startQuiz": "Start quiz on this topic"
   },
+  "studyHome": {
+    "title": "Study Home",
+    "welcome": "Welcome back",
+    "subjectCount": "{count} subjects",
+    "notebookCount": "{count} notebooks",
+    "sourceCount": "{count} sources",
+    "notebooksInSubject": "{count} notebooks",
+    "loadError": "Failed to load study home",
+    "otherSubject": "Other",
+    "untitledNotebook": "Untitled notebook",
+    "defaultNotebookName": "New notebook",
+    "openWorkspace": "Open workspace",
+    "newSubject": "New subject",
+    "subjectNamePlaceholder": "Subject name, e.g. History",
+    "firstNotebookPlaceholder": "First topic, e.g. The Renaissance",
+    "createSubject": "Create subject",
+    "today": "Today",
+    "yesterday": "Yesterday",
+    "daysAgo": "{count} days ago"
+  },
   "tutorExperience": {
     "studyHome": {
       "title": "Study Home",

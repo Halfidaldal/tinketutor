@@ -405,6 +405,26 @@
     "openInKnowledgeMap": "Åbn i videnkort",
     "startQuiz": "Start quiz om dette emne"
   },
+  "studyHome": {
+    "title": "Studiehjem",
+    "welcome": "Velkommen tilbage",
+    "subjectCount": "{count} fag",
+    "notebookCount": "{count} notesbøger",
+    "sourceCount": "{count} kilder",
+    "notebooksInSubject": "{count} notesbøger",
+    "loadError": "Kunne ikke indlæse studiehjem",
+    "otherSubject": "Andet",
+    "untitledNotebook": "Unavngivet notesbog",
+    "defaultNotebookName": "Ny notesbog",
+    "openWorkspace": "Åbn arbejdsområde",
+    "newSubject": "Nyt fag",
+    "subjectNamePlaceholder": "Fagnavn, f.eks. Historie",
+    "firstNotebookPlaceholder": "Første emne, f.eks. Renæssancen",
+    "createSubject": "Opret fag",
+    "today": "I dag",
+    "yesterday": "I går",
+    "daysAgo": "{count} dage siden"
+  },
   "tutorExperience": {
     "studyHome": {
       "title": "Studiehjem",

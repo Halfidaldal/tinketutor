@@ -744,7 +744,7 @@ async def _generate_llm_tutor_content(
 
         config = GenerationConfig(
             temperature=0.6,
-            max_tokens=512,
+            max_tokens=1024,
         )
         response = await llm.generate(prompt, evidence_items, config)
         content = response.content.strip()

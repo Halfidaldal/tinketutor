@@ -14,6 +14,7 @@ TUTOR_POLICY_PROMPT = """You are the Socratic Tutor for an educational notebook 
 Non-negotiable rules:
 - Stay grounded in the supplied evidence pack only.
 - Never fabricate a citation, source, page, or section.
+- When referencing evidence, use ONLY numbered citation tokens like [1], [2], [3] corresponding to the evidence items in order. NEVER write source titles, page numbers, or section names inline in the text. The system renders these tokens as interactive citation chips with full source details.
 - Default to guidance, not answer delivery.
 - Use evidence-pointing before explanation.
 - Ask for self-explanation when pedagogically reasonable.
@@ -81,16 +82,16 @@ Keep it to 1-2 sentences.
 """,
     "retrieval_prompt": """\
 The learner asked a broad question. You have found relevant evidence.
-Your job: Point them to a specific passage and ask them to identify which part is most relevant.
-Reference the source title and pages. Quote a very short excerpt if it helps.
+Your job: Point them to a specific passage using [1], [2] tokens and ask them to identify which part is most relevant.
+Quote a very short excerpt if it helps, but reference sources only via [1], [2] tokens.
 Do NOT answer their question yet — make them read the passage first.
 Keep it to 2-3 sentences.
 """,
     "hint_level_1": """\
 The learner needs a gentle first hint.
-Your job: Point them toward the strongest evidence passage and ask a guiding question.
+Your job: Point them toward the strongest evidence passage using [1], [2] tokens and ask a guiding question.
 Ask something like "What is the main claim or concept described in this passage?"
-Reference the source but do NOT reveal the answer.
+Do NOT reveal the answer.
 Keep it to 2-3 sentences, warm and encouraging.
 """,
     "hint_level_2": """\
@@ -115,8 +116,8 @@ Keep it to 2-3 sentences.
     "direct_answer_escalated": """\
 The learner has explicitly asked for the direct answer (escalation).
 Your job: Provide a clear, evidence-grounded answer using the supplied evidence.
-Cite specific passages. Be thorough but concise.
-After the answer, suggest they verify each part against the cited passages.
+Use [1], [2] citation tokens to reference evidence. Be thorough but concise.
+After the answer, suggest they verify each part against the cited sources.
 Keep it to 3-5 sentences.
 """,
     "insufficient_grounding": """\
@@ -157,13 +158,15 @@ def build_tutor_generation_prompt(
     evidence_block = ""
     if evidence_snippets:
         evidence_lines = []
-        for item in evidence_snippets:
+        for idx, item in enumerate(evidence_snippets, start=1):
             evidence_lines.append(
-                f"[{item['source_title']}] (p. {item.get('pages', '?')}): "
+                f"[{idx}] {item['source_title']} (p. {item.get('pages', '?')}): "
                 f"{item['snippet']}"
             )
         evidence_block = (
-            "\n\n## Evidence from the notebook\n" + "\n\n".join(evidence_lines)
+            "\n\n## Evidence from the notebook\n"
+            "Reference these items using [1], [2], etc. in your response.\n\n"
+            + "\n\n".join(evidence_lines)
         )
 
     history_block = ""

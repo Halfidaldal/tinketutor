@@ -36,11 +36,11 @@ export function TutorMessageCard({
 
   return (
     <article
-      className="surface"
+      className="surface animate-slide-up"
       style={{
-        padding: '0.9375rem',
+        padding: '1.125rem 1.25rem',
         display: 'grid',
-        gap: '0.625rem',
+        gap: '0.75rem',
         borderLeft: `3px solid ${isTutor ? 'var(--color-accent-primary)' : 'var(--color-border-secondary)'}`,
       }}
     >

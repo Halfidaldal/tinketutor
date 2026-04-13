@@ -16,7 +16,7 @@
  */
 
 import Link from 'next/link';
-import { FormEvent, useState } from 'react';
+import { FormEvent, useEffect, useRef, useState } from 'react';
 
 import { useI18n } from '../../lib/i18n';
 import {
@@ -59,6 +59,7 @@ export function TutorShellPanel({
 }: TutorShellPanelProps) {
   const { uiLocale, responseLocale, t } = useI18n();
   const [query, setQuery] = useState('');
+  const scrollRef = useRef<HTMLDivElement>(null);
 
   const controller = useTutorSessionController({
     notebookId,
@@ -94,6 +95,14 @@ export function TutorShellPanel({
 
   const progressCount = session?.message_count ?? 0;
   const progressPercent = Math.min((progressCount / TUTOR_MAX_MESSAGES) * 100, 100);
+
+  // Auto-scroll to bottom when new turns arrive
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (el) {
+      el.scrollTop = el.scrollHeight;
+    }
+  }, [turns]);
 
   const canEscalate = Boolean(
     session &&
@@ -279,13 +288,15 @@ export function TutorShellPanel({
 
       {/* Messages */}
       <div
+        ref={scrollRef}
+        className="tutor-conversation-area"
         style={{
           flex: 1,
           minHeight: 0,
           overflow: 'auto',
-          padding: '1rem',
+          padding: '1.25rem',
           display: 'grid',
-          gap: '0.75rem',
+          gap: '0.875rem',
         }}
       >
         {loading && (
@@ -493,16 +504,10 @@ export function TutorShellPanel({
           <button
             type="submit"
             disabled={submitting || !query.trim()}
+            className="btn-cta"
             style={{
-              padding: '0.625rem 0.875rem',
-              borderRadius: 'var(--radius-md)',
-              background: 'var(--color-accent-primary)',
-              color: '#fff',
-              fontSize: '0.8125rem',
-              fontWeight: 600,
+              width: '100%',
               opacity: submitting || !query.trim() ? 0.6 : 1,
-              border: 'none',
-              cursor: submitting || !query.trim() ? 'default' : 'pointer',
             }}
           >
             {submitting

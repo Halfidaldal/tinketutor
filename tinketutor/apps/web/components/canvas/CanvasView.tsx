@@ -1,14 +1,12 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import {
   Background,
   Controls,
   Edge,
   EdgeMouseHandler,
-  MarkerType,
-  MiniMap,
   Node,
   NodeMouseHandler,
   ReactFlow,
@@ -21,7 +19,6 @@ import type {
   ConceptEdgeDTO,
   ConceptMapDTO,
   ConceptNodeDTO,
-  EvidenceSupport,
 } from '../../lib/concept-map';
 import { useI18n } from '../../lib/i18n';
 import CanvasInspector from './CanvasInspector';
@@ -30,85 +27,100 @@ import CanvasNode, { CanvasFlowNodeData } from './CanvasNode';
 const nodeTypes = { concept: CanvasNode };
 type FlowConceptNode = Node<CanvasFlowNodeData, 'concept'>;
 
-const SUPPORT_STYLE: Record<EvidenceSupport, { color: string; stroke: string }> = {
-  strong: {
-    color: 'var(--color-success)',
-    stroke: 'var(--color-success)',
-  },
-  partial: {
-    color: 'var(--color-warning)',
-    stroke: 'var(--color-warning)',
-  },
-  weak: {
-    color: 'var(--color-error)',
-    stroke: 'var(--color-error)',
-  },
-};
+// --- Tree layout helpers ---
 
-function toFlowNodes(
-  nodes: ConceptNodeDTO[],
-  selection: CanvasSelectionContext,
-): FlowConceptNode[] {
-  return nodes.map((node) => ({
-    id: node.id,
-    type: 'concept',
-    position: { x: node.position_x, y: node.position_y },
-    selected: selection?.type === 'node' && selection.node.id === node.id,
-    data: {
-      label: node.label,
-      summary: node.summary,
-      guidingQuestion: node.guiding_question,
-      status: node.status,
-      support: node.support,
-      uncertain: node.uncertain,
-      needsRefinement: node.needs_refinement,
-      citationCount: node.citation_ids.length,
-    },
-  }));
+interface TreeNode {
+  id: string;
+  children: string[];
 }
 
-function toFlowEdges(
-  edges: ConceptEdgeDTO[],
-  selection: CanvasSelectionContext,
-): Edge[] {
-  return edges.map((edge) => {
-    const supportStyle = SUPPORT_STYLE[edge.support];
-    return {
-      id: edge.id,
-      source: edge.source_node_id,
-      target: edge.target_node_id,
-      type: 'smoothstep',
-      label: edge.label,
-      selected: selection?.type === 'edge' && selection.edge.id === edge.id,
-      animated: false,
-      markerEnd: {
-        type: MarkerType.ArrowClosed,
-        width: 18,
-        height: 18,
-        color: supportStyle.stroke,
-      },
-      style: {
-        stroke: supportStyle.stroke,
-        strokeWidth: edge.uncertain ? 1.4 : 1.8,
-        strokeDasharray: edge.uncertain ? '6 4' : undefined,
-      },
-      labelStyle: {
-        fill: supportStyle.color,
-        fontWeight: 700,
-        fontSize: 11,
-      },
-      labelShowBg: true,
-      labelBgStyle: {
-        fill: 'var(--color-bg-elevated)',
-        fillOpacity: 0.96,
-        stroke: 'var(--color-border-primary)',
-        strokeWidth: 1,
-      },
-      labelBgPadding: [6, 4],
-      labelBgBorderRadius: 999,
-    };
-  });
+function buildTree(nodes: ConceptNodeDTO[], edges: ConceptEdgeDTO[]): Map<string, TreeNode> {
+  const tree = new Map<string, TreeNode>();
+  for (const node of nodes) {
+    tree.set(node.id, { id: node.id, children: [] });
+  }
+  for (const edge of edges) {
+    const parent = tree.get(edge.source_node_id);
+    if (parent && tree.has(edge.target_node_id)) {
+      parent.children.push(edge.target_node_id);
+    }
+  }
+  return tree;
 }
+
+function findRoots(nodes: ConceptNodeDTO[], edges: ConceptEdgeDTO[]): string[] {
+  const targets = new Set(edges.map((e) => e.target_node_id));
+  const roots = nodes.filter((n) => !targets.has(n.id)).map((n) => n.id);
+  return roots.length > 0 ? roots : nodes.length > 0 ? [nodes[0].id] : [];
+}
+
+const H_GAP = 220;
+const V_GAP = 56;
+
+function layoutTree(
+  tree: Map<string, TreeNode>,
+  roots: string[],
+  expandedSet: Set<string>,
+): Map<string, { x: number; y: number }> {
+  const positions = new Map<string, { x: number; y: number }>();
+  let currentY = 0;
+
+  function layoutSubtree(nodeId: string, depth: number): number {
+    const treeNode = tree.get(nodeId);
+    const visibleChildren =
+      treeNode && expandedSet.has(nodeId)
+        ? treeNode.children.filter((id) => tree.has(id))
+        : [];
+
+    if (visibleChildren.length === 0) {
+      positions.set(nodeId, { x: depth * H_GAP, y: currentY });
+      currentY += V_GAP;
+      return positions.get(nodeId)!.y;
+    }
+
+    const childYs: number[] = [];
+    for (const childId of visibleChildren) {
+      childYs.push(layoutSubtree(childId, depth + 1));
+    }
+
+    const midY = (childYs[0] + childYs[childYs.length - 1]) / 2;
+    positions.set(nodeId, { x: depth * H_GAP, y: midY });
+    return midY;
+  }
+
+  for (const rootId of roots) {
+    layoutSubtree(rootId, 0);
+  }
+
+  return positions;
+}
+
+function collectVisibleIds(
+  tree: Map<string, TreeNode>,
+  roots: string[],
+  expandedSet: Set<string>,
+): Set<string> {
+  const visible = new Set<string>();
+
+  function walk(nodeId: string) {
+    visible.add(nodeId);
+    const treeNode = tree.get(nodeId);
+    if (treeNode && expandedSet.has(nodeId)) {
+      for (const childId of treeNode.children) {
+        if (tree.has(childId)) {
+          walk(childId);
+        }
+      }
+    }
+  }
+
+  for (const rootId of roots) {
+    walk(rootId);
+  }
+  return visible;
+}
+
+// --- Component ---
 
 function assessmentLabel(assessment: string, t: (key: string) => string) {
   switch (assessment) {
@@ -160,60 +172,131 @@ export default function CanvasView({
   const [flowNodes, setFlowNodes, onNodesChange] = useNodesState<FlowConceptNode>([]);
   const [flowEdges, setFlowEdges, onEdgesChange] = useEdgesState<Edge>([]);
   const [paneWidth, setPaneWidth] = useState(0);
+  const [expandedNodes, setExpandedNodes] = useState<Set<string> | null>(null);
 
-  const uncertainNodeCount = nodes.filter((node) => node.uncertain).length;
-  const uncertainEdgeCount = edges.filter((edge) => edge.uncertain).length;
-  const filledNodeCount = nodes.filter((node) => node.status !== 'skeleton').length;
-  const skeletonNodeCount = nodes.filter((node) => node.status === 'skeleton').length;
+  // Memoize tree structure so it doesn't cause infinite effect loops
+  const tree = useMemo(() => buildTree(nodes, edges), [nodes, edges]);
+  const roots = useMemo(() => findRoots(nodes, edges), [nodes, edges]);
+
+  // Seed expanded set on first meaningful data
+  const expanded = useMemo(() => {
+    if (expandedNodes !== null) return expandedNodes;
+    return new Set(roots);
+  }, [expandedNodes, roots]);
+
+  const toggleExpand = useCallback((nodeId: string) => {
+    setExpandedNodes((prev) => {
+      const base = prev ?? new Set(roots);
+      const next = new Set(base);
+      if (next.has(nodeId)) {
+        next.delete(nodeId);
+      } else {
+        next.add(nodeId);
+      }
+      return next;
+    });
+  }, [roots]);
+
+  // Derive child-has-children lookup
+  const hasChildrenMap = useMemo(() => {
+    const map = new Map<string, boolean>();
+    for (const [id, node] of tree.entries()) {
+      map.set(id, node.children.length > 0);
+    }
+    return map;
+  }, [tree]);
+
+  // Compute flow nodes and edges from the tree + expanded state
+  // This runs synchronously during render via useMemo — no useEffect needed
+  const computedFlowNodes = useMemo((): FlowConceptNode[] => {
+    const visibleIds = collectVisibleIds(tree, roots, expanded);
+    const positions = layoutTree(tree, roots, expanded);
+    const nodeMap = new Map(nodes.map((n) => [n.id, n]));
+    const result: FlowConceptNode[] = [];
+
+    for (const nodeId of visibleIds) {
+      const node = nodeMap.get(nodeId);
+      const pos = positions.get(nodeId);
+      if (!node || !pos) continue;
+
+      result.push({
+        id: node.id,
+        type: 'concept',
+        position: { x: pos.x, y: pos.y },
+        selected: selection?.type === 'node' && selection.node.id === node.id,
+        data: {
+          label: node.label,
+          summary: node.summary,
+          guidingQuestion: node.guiding_question,
+          status: node.status,
+          support: node.support,
+          uncertain: node.uncertain,
+          needsRefinement: node.needs_refinement,
+          citationCount: node.citation_ids.length,
+          hasChildren: hasChildrenMap.get(node.id) ?? false,
+          expanded: expanded.has(node.id),
+          onToggleExpand: toggleExpand,
+          nodeId: node.id,
+        },
+      });
+    }
+    return result;
+  }, [nodes, tree, roots, expanded, selection, hasChildrenMap, toggleExpand]);
+
+  const computedFlowEdges = useMemo((): Edge[] => {
+    const visibleIds = collectVisibleIds(tree, roots, expanded);
+    return edges
+      .filter((edge) => visibleIds.has(edge.source_node_id) && visibleIds.has(edge.target_node_id))
+      .map((edge) => ({
+        id: edge.id,
+        source: edge.source_node_id,
+        target: edge.target_node_id,
+        type: 'bezier',
+        animated: false,
+        style: {
+          stroke: 'var(--color-border-secondary)',
+          strokeWidth: 1.5,
+        },
+      }));
+  }, [edges, tree, roots, expanded]);
+
+  // Sync computed values to ReactFlow state
+  useEffect(() => {
+    setFlowNodes(computedFlowNodes);
+  }, [computedFlowNodes, setFlowNodes]);
 
   useEffect(() => {
-    setFlowNodes(toFlowNodes(nodes, selection));
-    setFlowEdges(toFlowEdges(edges, selection));
-  }, [edges, nodes, selection, setFlowEdges, setFlowNodes]);
+    setFlowEdges(computedFlowEdges);
+  }, [computedFlowEdges, setFlowEdges]);
 
   useEffect(() => {
     const element = rootRef.current;
-    if (!element) {
-      return;
-    }
+    if (!element) return;
 
     const observer = new ResizeObserver(([entry]) => {
       setPaneWidth(entry.contentRect.width);
     });
-
     observer.observe(element);
     return () => observer.disconnect();
   }, []);
 
   const handleNodeClick: NodeMouseHandler<FlowConceptNode> = (_event, node) => {
-    const selectedNode = nodes.find((candidate) => candidate.id === node.id);
-    if (!selectedNode) {
-      return;
-    }
-    onSelect({
-      type: 'node',
-      conceptMapId: conceptMap.id,
-      node: selectedNode,
-    });
+    const selectedNode = nodes.find((c) => c.id === node.id);
+    if (!selectedNode) return;
+    onSelect({ type: 'node', conceptMapId: conceptMap.id, node: selectedNode });
   };
 
   const handleEdgeClick: EdgeMouseHandler<Edge> = (_event, edge) => {
-    const selectedEdge = edges.find((candidate) => candidate.id === edge.id);
-    if (!selectedEdge) {
-      return;
-    }
-    const sourceLabel = nodes.find((candidate) => candidate.id === selectedEdge.source_node_id)?.label || 'Source';
-    const targetLabel = nodes.find((candidate) => candidate.id === selectedEdge.target_node_id)?.label || 'Target';
-    onSelect({
-      type: 'edge',
-      conceptMapId: conceptMap.id,
-      edge: selectedEdge,
-      sourceLabel,
-      targetLabel,
-    });
+    const selectedEdge = edges.find((c) => c.id === edge.id);
+    if (!selectedEdge) return;
+    const sourceLabel = nodes.find((c) => c.id === selectedEdge.source_node_id)?.label || 'Source';
+    const targetLabel = nodes.find((c) => c.id === selectedEdge.target_node_id)?.label || 'Target';
+    onSelect({ type: 'edge', conceptMapId: conceptMap.id, edge: selectedEdge, sourceLabel, targetLabel });
   };
 
   const showSideInspector = Boolean(selection && paneWidth >= 1040);
+  const filledNodeCount = nodes.filter((node) => node.status !== 'skeleton').length;
+  const skeletonNodeCount = nodes.filter((node) => node.status === 'skeleton').length;
 
   return (
     <div
@@ -260,18 +343,12 @@ export default function CanvasView({
               <span>{t('knowledgeMapView.relationshipsCount', { values: { count: edges.length } })}</span>
               <span>{t('knowledgeMapView.filledNodes', { values: { count: filledNodeCount, total: nodes.length } })}</span>
               <span>{t('knowledgeMapView.skeletonCount', { values: { count: skeletonNodeCount } })}</span>
-              <span>{t('knowledgeMapView.tentativeElements', { values: { count: uncertainNodeCount + uncertainEdgeCount } })}</span>
             </div>
           </div>
 
           <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
             {generating && (
-              <span
-                style={{
-                  fontSize: '0.72rem',
-                  color: 'var(--color-text-secondary)',
-                }}
-              >
+              <span style={{ fontSize: '0.72rem', color: 'var(--color-text-secondary)' }}>
                 {t('knowledgeMapView.regeneratingMap')}
               </span>
             )}
@@ -307,26 +384,11 @@ export default function CanvasView({
             onEdgeClick={handleEdgeClick}
             onPaneClick={onClearSelection}
             nodesConnectable={false}
-            nodesDraggable
-            onNodeDragStop={(_, node) => {
-              onSaveNode(node.id, {
-                positionX: node.position.x,
-                positionY: node.position.y,
-              }).catch(() => undefined);
-            }}
+            nodesDraggable={false}
             proOptions={{ hideAttribution: true }}
             style={{ background: 'var(--color-bg-primary)' }}
           >
-            <Background color="rgba(124, 109, 245, 0.08)" gap={24} />
-            <MiniMap
-              pannable
-              zoomable
-              maskColor="rgba(26, 26, 46, 0.05)"
-              nodeColor={(node) => {
-                const support = (node.data as unknown as CanvasFlowNodeData).support;
-                return SUPPORT_STYLE[support].stroke;
-              }}
-            />
+            <Background color="rgba(13, 148, 136, 0.08)" gap={24} />
             <Controls showInteractive={false} />
           </ReactFlow>
         </div>
