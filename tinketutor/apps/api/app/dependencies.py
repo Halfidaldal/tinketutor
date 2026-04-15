@@ -75,6 +75,11 @@ def get_tutor_llm() -> LLMProvider:
     return get_llm_provider(role="tutor")
 
 
+def get_mindmap_llm() -> LLMProvider:
+    """Get the configured mindmap LLM provider instance."""
+    return get_llm_provider(role="mindmap")
+
+
 def get_parser() -> ParserProvider:
     """Get the configured parser provider instance."""
     return get_parser_provider()

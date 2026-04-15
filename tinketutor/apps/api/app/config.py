@@ -47,11 +47,18 @@ class Settings(BaseSettings):
 
     # Google Vertex AI / Gemini
     google_cloud_project: str = ""
+    # Region for GENERATIVE models (Gemini). As of 2026-04, the Gemini 3.1 preview
+    # series is only served on the `global` endpoint.
     google_cloud_location: str = "europe-west1"
+    # Region for EMBEDDING models. These are regional-only resources and do NOT
+    # exist on the `global` endpoint. Fall back to google_cloud_location when
+    # unset (preserves prior behavior for deployments still on a regional endpoint).
+    google_cloud_embedding_location: str = ""
     gemini_model: str = "gemini-2.5-flash"
     embedding_model: str = "text-embedding-004"
     vertex_model_tutor: str = ""
     vertex_model_structured: str = ""
+    vertex_model_mindmap: str = ""
     vertex_embedding: str = ""
 
     # OpenAI (stubbed for v1)
@@ -131,7 +138,7 @@ class Settings(BaseSettings):
             return value.strip().lower()
         return value
 
-    @field_validator("vertex_model_tutor", "vertex_model_structured", "vertex_embedding", mode="before")
+    @field_validator("vertex_model_tutor", "vertex_model_structured", "vertex_model_mindmap", "vertex_embedding", mode="before")
     @classmethod
     def normalize_optional_model_strings(cls, value: object) -> object:
         if isinstance(value, str):
@@ -147,8 +154,17 @@ class Settings(BaseSettings):
         return self.vertex_model_structured or self.gemini_model
 
     @property
+    def resolved_mindmap_model(self) -> str:
+        return self.vertex_model_mindmap or self.gemini_model
+
+    @property
     def resolved_embedding_model(self) -> str:
         return self.vertex_embedding or self.embedding_model
+
+    @property
+    def resolved_embedding_location(self) -> str:
+        """Region for embedding models. Falls back to the generative region when unset."""
+        return self.google_cloud_embedding_location or self.google_cloud_location
 
 
 settings = Settings()

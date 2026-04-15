@@ -126,3 +126,20 @@ export function getSelectionLabel(selection: CanvasSelectionContext): string {
   }
   return `${selection.sourceLabel} ${selection.edge.label} ${selection.targetLabel}`;
 }
+
+// ============================================================
+// Mindmap Tree Types (recursive hierarchy from LLM)
+// ============================================================
+
+export interface MindmapNode {
+  id: string;
+  label: string;
+  summary: string;
+  guiding_question: string;
+  children: MindmapNode[];
+}
+
+export interface MindmapTree {
+  title: string;
+  nodes: MindmapNode[];
+}

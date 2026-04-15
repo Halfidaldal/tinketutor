@@ -31,14 +31,16 @@ def get_llm_provider(role: str = "structured") -> LLMProvider:
     if settings.llm_provider == "google_vertex":
         from app.providers.google_vertex import GoogleVertexProvider
 
-        model = (
-            settings.resolved_tutor_model
-            if role == "tutor"
-            else settings.resolved_structured_model
-        )
+        if role == "tutor":
+            model = settings.resolved_tutor_model
+        elif role == "mindmap":
+            model = settings.resolved_mindmap_model
+        else:
+            model = settings.resolved_structured_model
         return GoogleVertexProvider(
             project=settings.google_cloud_project,
             location=settings.google_cloud_location,
+            embedding_location=settings.resolved_embedding_location,
             model=model,
             embedding_model=settings.resolved_embedding_model,
         )

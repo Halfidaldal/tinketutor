@@ -19,6 +19,7 @@ from app.api.v1.tutor import router as tutor_router
 from app.api.v1.quizzes import router as quizzes_router
 from app.api.v1.gaps import router as gaps_router
 from app.api.v1.jobs import router as jobs_router
+from app.api.v1.mindmap import router as mindmap_router
 from app.api.v1.users import router as users_router
 
 api_v1_router = APIRouter()
@@ -32,6 +33,7 @@ api_v1_router.include_router(search_router, tags=["Search"])
 # --- SynthesisWorkspace context ---
 api_v1_router.include_router(notebooks_router, prefix="/notebooks", tags=["Notebooks"])
 api_v1_router.include_router(concept_maps_router, prefix="/notebooks", tags=["Concept Maps"])
+api_v1_router.include_router(mindmap_router, prefix="/notebooks", tags=["Mindmap"])
 
 # --- ActiveLearning context: Tutor ---
 api_v1_router.include_router(tutor_router, prefix="/notebooks", tags=["Tutor"])

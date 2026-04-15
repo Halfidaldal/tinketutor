@@ -425,6 +425,21 @@
     "yesterday": "Yesterday",
     "daysAgo": "{count} days ago"
   },
+  "mindmap": {
+    "conceptDetail": "Concept Detail",
+    "summary": "Summary",
+    "guidingQuestion": "Guiding question:",
+    "depth": "Depth",
+    "leafNode": "Leaf node",
+    "childCount": "{count} sub-concepts",
+    "basedOnSources": "Based on {count} sources",
+    "hierarchicalTree": "Hierarchical tree",
+    "totalConcepts": "{count} concepts",
+    "topLevelThemes": "{count} top-level themes",
+    "regenerating": "Regenerating…",
+    "regenerate": "Regenerate",
+    "resetView": "Reset view"
+  },
   "tutorExperience": {
     "studyHome": {
       "title": "Study Home",

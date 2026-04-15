@@ -524,6 +524,7 @@ class GenerationConfig(BaseModel):
     temperature: float = 0.7
     max_tokens: int = 4096
     response_format: str | None = None  # "json" for structured output
+    response_schema: dict | None = None  # JSON Schema for structured output (Vertex AI)
     stop_sequences: list[str] = Field(default_factory=list)
 
 

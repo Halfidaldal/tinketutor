@@ -425,6 +425,21 @@
     "yesterday": "I går",
     "daysAgo": "{count} dage siden"
   },
+  "mindmap": {
+    "conceptDetail": "Begrebsdetalje",
+    "summary": "Opsummering",
+    "guidingQuestion": "Vejledende spørgsmål:",
+    "depth": "Dybde",
+    "leafNode": "Bladknude",
+    "childCount": "{count} underbegreber",
+    "basedOnSources": "Baseret på {count} kilder",
+    "hierarchicalTree": "Hierarkisk træ",
+    "totalConcepts": "{count} begreber",
+    "topLevelThemes": "{count} hovedtemaer",
+    "regenerating": "Genererer igen…",
+    "regenerate": "Generér igen",
+    "resetView": "Nulstil visning"
+  },
   "tutorExperience": {
     "studyHome": {
       "title": "Studiehjem",

@@ -352,6 +352,14 @@ export const api = {
       }),
   },
 
+  // --- Mindmap (SynthesisWorkspace) ---
+  mindmap: {
+    generate: (notebookId: string) =>
+      apiFetch(`/notebooks/${notebookId}/mindmap`, {
+        method: 'POST',
+      }),
+  },
+
   // --- Tutor (ActiveLearning) ---
   tutor: {
     startSession: (notebookId: string, payload: {
