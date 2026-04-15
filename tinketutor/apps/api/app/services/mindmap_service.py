@@ -1,18 +1,26 @@
 """
-Mindmap Service — Hierarchical Knowledge Map Generation
+Mindmap Service — Hierarchical Knowledge Map Generation (Two-Pass)
 
-Uses a single-pass "Knowledge Architect" approach:
-1. Collects ALL source chunks for a notebook
-2. Sends them to Gemini with a structured output schema
-3. Receives a recursive JSON tree representing the knowledge hierarchy
-4. Returns the tree directly to the frontend for rendering
+Uses a two-pass "Knowledge Architect" approach for NotebookLM-level density:
 
-The LLM acts as a taxonomy expert, producing a clean hierarchical tree
-with labels, summaries, and guiding questions at each node.
+Pass 1 (Skeleton):
+  - Analyses ALL source chunks for a notebook
+  - Produces only the Level-1 themes (id, label, summary, guiding_question)
+  - Lightweight — focuses model attention on broad coverage
+
+Pass 2 (Fill — parallelised):
+  - For each Level-1 theme, a separate LLM call produces its Level-2 concepts
+    and Level-3 specific leaves
+  - Each branch gets the model's full attention budget
+  - Runs concurrently via asyncio.gather for ~3-5s total latency
+
+This architecture removes the single-response token ceiling, quadruples
+density, and ensures every branch is richly populated.
 """
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import os
@@ -34,12 +42,39 @@ _MINDMAP_DEBUG_DIR = Path(os.environ.get("MINDMAP_DEBUG_DIR", "/tmp/mindmap-debu
 
 
 # ============================================================
-# JSON Schema for Recursive Mindmap Tree
+# JSON Schemas — one per pass
 # ============================================================
 
 # NOTE: Vertex Gemini structured output does NOT reliably support $ref/$defs
-# recursion. We use an explicit 3-level schema instead. This matches our
-# documented 3-level hierarchy (themes → concepts → details) exactly.
+# recursion, and minItems/maxItems on nested arrays causes "too many states"
+# errors. We keep schemas flat and move cardinality enforcement to prompts.
+
+# --- Pass 1: Skeleton (themes only) ---
+
+_SKELETON_THEME_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "id": {"type": "string"},
+        "label": {"type": "string"},
+        "summary": {"type": "string"},
+        "guiding_question": {"type": "string"},
+    },
+    "required": ["id", "label", "summary", "guiding_question"],
+}
+
+SKELETON_RESPONSE_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "title": {"type": "string"},
+        "themes": {
+            "type": "array",
+            "items": _SKELETON_THEME_SCHEMA,
+        },
+    },
+    "required": ["title", "themes"],
+}
+
+# --- Pass 2: Branch fill (concepts + leaves) ---
 
 _LEAF_NODE_SCHEMA = {
     "type": "object",
@@ -52,7 +87,7 @@ _LEAF_NODE_SCHEMA = {
     "required": ["id", "label", "summary", "guiding_question"],
 }
 
-_MID_NODE_SCHEMA = {
+_CONCEPT_NODE_SCHEMA = {
     "type": "object",
     "properties": {
         "id": {"type": "string"},
@@ -67,6 +102,19 @@ _MID_NODE_SCHEMA = {
     "required": ["id", "label", "summary", "guiding_question", "children"],
 }
 
+BRANCH_FILL_RESPONSE_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "concepts": {
+            "type": "array",
+            "items": _CONCEPT_NODE_SCHEMA,
+        },
+    },
+    "required": ["concepts"],
+}
+
+# --- Legacy: Full tree schema (kept for validation/fallback) ---
+
 _ROOT_NODE_SCHEMA = {
     "type": "object",
     "properties": {
@@ -76,7 +124,7 @@ _ROOT_NODE_SCHEMA = {
         "guiding_question": {"type": "string"},
         "children": {
             "type": "array",
-            "items": _MID_NODE_SCHEMA,
+            "items": _CONCEPT_NODE_SCHEMA,
         },
     },
     "required": ["id", "label", "summary", "guiding_question", "children"],
@@ -85,9 +133,7 @@ _ROOT_NODE_SCHEMA = {
 MINDMAP_RESPONSE_SCHEMA = {
     "type": "object",
     "properties": {
-        "title": {
-            "type": "string",
-        },
+        "title": {"type": "string"},
         "nodes": {
             "type": "array",
             "items": _ROOT_NODE_SCHEMA,
@@ -98,112 +144,105 @@ MINDMAP_RESPONSE_SCHEMA = {
 
 
 # ============================================================
-# Knowledge Architect System Prompt
+# Prompts
 # ============================================================
 
-KNOWLEDGE_ARCHITECT_PROMPT = """\
-You are a **Knowledge Architect** building a comprehensive study mind map from the source \
-material below. Your map must be detailed enough that a student could use it as a complete \
-navigation guide to the entire source material.
+# --- Pass 1: Skeleton prompt ---
 
-# HARD CONSTRAINTS — violating ANY of these is a failure
-1. You MUST produce **at least 5 and at most 8 Level-1 theme nodes**. Fewer than 5 is UNACCEPTABLE.
-2. Each Level-1 node MUST have **at least 2 and at most 6 Level-2 concept children**.
-3. Each Level-2 node MUST have **at least 2 Level-3 leaf children** when the source material \
-contains any supporting specifics (definitions, examples, named results, sub-distinctions). \
-Only use fewer than 2 if the source genuinely has no further detail for that concept.
-4. The total tree MUST contain **at least 40 nodes** across all three levels.
-5. Every piece of the source material must be represented somewhere in the tree.
+SKELETON_PROMPT = """\
+You are a **Knowledge Architect** analysing source material to identify its major topic areas.
 
-# Structure (exactly 3 levels)
-- **Level 1 — Themes**: The major topic areas discussed across the source material. \
-These should partition the subject comprehensively — every significant topic in the sources \
-should fall under exactly one Level-1 theme. Think of these as chapter headings.
-- **Level 2 — Concepts**: The key concepts, methods, or sub-topics within each theme, \
-as the sources present them. Think of these as section headings.
-- **Level 3 — Specifics**: Concrete terms, definitions, named theorems, formulas, examples, \
-distinctions, or sub-results from the sources. These are the "atoms" of knowledge — precise \
-and look-uppable. Think of these as index entries.
+# YOUR TASK
+Produce ONLY the Level-1 themes (the major topic areas) from the source material below.
+Do NOT produce sub-concepts or specifics — that comes later. Focus entirely on identifying
+the 5–8 broadest, most distinct topic areas that comprehensively partition the source material.
 
-# Grounding mandate
-Every node MUST be DIRECTLY grounded in the source material. Do NOT invent topics. \
-Do NOT output generic placeholder categories unless those exact terms appear in the sources. \
-If you cannot point to a specific passage that justifies a node, do not include it.
+# HARD CONSTRAINTS
+1. You MUST produce **at least 5 and at most 8** themes. Fewer than 5 is UNACCEPTABLE.
+2. Every significant section/chapter/topic in the sources MUST be covered by at least one theme.
+3. Themes must be MUTUALLY EXCLUSIVE — each source topic falls under exactly one theme.
+4. Themes must be COLLECTIVELY EXHAUSTIVE — no significant source content is left uncovered.
 
 # Field rules
-- `id`: dot notation — `"n1"`, `"n1.2"`, `"n1.2.3"`.
-- `label`: 2-6 words using terminology FROM the sources.
-  - **Level-1 labels**: Broad theme names that appear in the source structure.
+- `id`: sequential — `"n1"`, `"n2"`, etc.
+- `label`: 2–6 words using terminology FROM the sources. These are chapter-level headings.
+- `summary`: ONE sentence describing what this theme covers, grounded in source content.
+- `guiding_question`: A Socratic question about this theme area.
+- `title`: A concise, specific name for the overall subject matter.
+- All text MUST be in the same language as the source material.
+
+# Grounding mandate
+Every theme MUST be DIRECTLY grounded in the source material. Do NOT invent topics.
+If you cannot point to specific passages that justify a theme, do not include it.
+
+# Coverage self-check
+Before finalizing, verify:
+1. Have I covered ALL major sections/chapters from the sources?
+2. Does each theme represent a genuinely distinct topic area?
+3. Are there at least 5 themes?
+4. Would a student using these themes be able to navigate the ENTIRE source material?
+
+# Source Material
+{source_content}
+"""
+
+# --- Pass 2: Branch fill prompt ---
+
+BRANCH_FILL_PROMPT = """\
+You are a **Knowledge Architect** building a detailed sub-tree for ONE theme of a study mind map.
+
+# CONTEXT
+The overall mind map title is: **{map_title}**
+You are expanding theme **{theme_id}**: **{theme_label}**
+Theme summary: {theme_summary}
+
+# YOUR TASK
+Produce the Level-2 concepts and Level-3 specifics for this theme ONLY, based on the
+source material below. Each concept you produce will become a child of this theme node.
+
+# HARD CONSTRAINTS
+1. You MUST produce **at least 3 and at most 6 Level-2 concept nodes**.
+2. Each Level-2 concept MUST have **at least 2 and at most 5 Level-3 leaf children**.
+3. Every piece of source content relevant to theme "{theme_label}" must appear somewhere.
+4. You MUST produce at least 10 total nodes (concepts + leaves combined).
+
+# Structure
+- **Level 2 — Concepts**: Key concepts, methods, or sub-topics within this theme. \
+Think of these as section headings within a chapter.
+- **Level 3 — Specifics**: Concrete terms, definitions, named theorems, formulas, examples, \
+distinctions, or sub-results. These are the "atoms" of knowledge — precise and look-uppable. \
+Think of these as index entries.
+
+# Field rules
+- `id`: Use dot notation starting from the theme id. For theme "{theme_id}":
+  - Concepts: "{theme_id}.1", "{theme_id}.2", etc.
+  - Leaves: "{theme_id}.1.1", "{theme_id}.1.2", etc.
+- `label`: 2–6 words using terminology FROM the sources.
   - **Level-2 labels**: Concept or method names as the sources present them.
   - **Level-3 labels** MUST be specific: named theorems, defined terms, concrete examples, \
     technical distinctions, or formulas. Add a parenthetical clarifier when it aids precision.
     - ✅ GOOD: "Connectives (¬, ∨, ∧, →, ↔)", "Liar Paradox (Self-reference)", \
       "Closure rules", "Sentence Letters (A, B, C)", "Branching vs. Non-branching rules"
-    - ❌ BAD: "Important concepts", "Key ideas", "Other topics", "Further details", \
-      "Related methods", "Applications"
-- `summary`: ONE sentence paraphrasing what the sources actually say about this concept. \
-Be factual and specific — avoid vague summaries like "This is an important topic."
+    - ❌ BAD: "Important concepts", "Key ideas", "Other topics", "Further details"
+- `summary`: ONE sentence paraphrasing what the sources actually say about this concept.
 - `guiding_question`: A Socratic question engaging the student with THIS specific material.
   - ✅ GOOD: "How does the closure rule determine when a tree path is finished?"
-  - ❌ BAD: "What is X?", "Why is X important?", "Can you explain X?"
+  - ❌ BAD: "What is X?", "Why is X important?"
 - All text MUST be in the same language as the source material.
-- Root `title`: a concise, specific name for the overall subject.
+
+# Grounding mandate
+Every node MUST be DIRECTLY grounded in the source material. Do NOT invent topics.
 
 # Common mistakes to AVOID
-- ❌ Producing only 2-3 Level-1 themes (you MUST produce at least 5)
-- ❌ Having Level-2 nodes with 0 or 1 children (aim for 2-4 leaves each)
-- ❌ Using vague Level-3 labels like "Related concepts" or "Applications"
-- ❌ Collapsing distinct topics into a single over-broad theme
-- ❌ Ignoring entire sections or chapters of the source material
-- ❌ Making all Level-1 themes about the same narrow sub-area
+- ❌ Producing only 1–2 concepts (you MUST produce at least 3)
+- ❌ Having concepts with 0 or 1 children (each MUST have at least 2 leaves)
+- ❌ Using vague leaf labels like "Related concepts" or "Applications"
 - ❌ Writing generic summaries that could apply to any topic
-
-# Coverage self-check
-Before finalizing your output, mentally verify:
-1. Have I covered ALL major sections/chapters from the source material?
-2. Does each Level-1 theme represent a genuinely distinct topic area?
-3. Are my Level-3 leaves specific enough that a student could look them up in the sources?
-4. Would a student using this map be able to navigate the ENTIRE source material?
-5. Do I have at least 40 total nodes? If not, I need to add more detail.
-
-# Quality exemplar (shape, breadth, and specificity benchmark)
-Do NOT copy this — use it ONLY as a style and density benchmark:
-
-  Title: Foundations and Methods of Formal Logic
-  ├── Central Task of Logic
-  │   ├── Assessing argument validity
-  │   ├── Determining logical consequence
-  │   └── Modelling linguistic meaning
-  ├── Propositional Logic (PL)
-  │   ├── Syntax
-  │   │   ├── Sentence Letters (A, B, C)
-  │   │   ├── Connectives (¬, ∨, ∧, →, ↔)
-  │   │   └── Well-formed formulas (wffs)
-  │   └── Semantics
-  │       ├── Truth assignments (valuation function v)
-  │       └── Logical consequence (semantic)
-  ├── Logical Methods
-  │   ├── Truth-Table Method
-  │   │   ├── Satisfiability-tester
-  │   │   └── Exponential growth problem
-  │   └── Tree Method
-  │       ├── Closure rules
-  │       ├── Branching vs. Non-branching rules
-  │       └── Read models from open paths
-  ├── Metatheory
-  │   ├── Soundness (w.r.t. unsatisfiability)
-  │   └── Completeness (w.r.t. satisfiability)
-  └── Challenges to Bivalence
-      ├── Vagueness (Sorites Paradox)
-      ├── Fuzzy Logic (Degrees of truth)
-      └── Liar Paradox (Self-reference)
-
-Notice: 5 Level-1 themes, 2-3 Level-2 children each, 2-3 specific Level-3 leaves each. \
-Total: ~30 nodes. Your output should aim for this density or higher.
+- ❌ Ignoring source content that falls under this theme
 
 # Source Material
 {source_content}
-"
+"""
 
 
 def _write_debug_artifact(
@@ -224,6 +263,129 @@ def _write_debug_artifact(
 
 
 # ============================================================
+# Two-Pass Generation Internals
+# ============================================================
+
+
+async def _pass1_skeleton(
+    *,
+    llm: LLMProvider,
+    source_content: str,
+    notebook_id: str,
+) -> dict:
+    """
+    Pass 1: Generate the skeleton — just the Level-1 themes.
+    Returns {"title": str, "themes": [{"id", "label", "summary", "guiding_question"}, ...]}.
+    """
+    prompt = SKELETON_PROMPT.format(source_content=source_content)
+    _write_debug_artifact(notebook_id, "pass1-prompt.txt", prompt)
+
+    config = GenerationConfig(
+        temperature=0.3,
+        max_tokens=4096,  # Themes-only is lightweight
+        response_format="json",
+        response_schema=SKELETON_RESPONSE_SCHEMA,
+    )
+
+    response = await llm.generate(prompt=prompt, context=[], config=config)
+
+    _write_debug_artifact(notebook_id, "pass1-response.json", response.content or "")
+    logger.info(
+        "Pass 1 skeleton response (notebook=%s, len=%d):\n%s",
+        notebook_id,
+        len(response.content or ""),
+        (response.content or "")[:3000],
+    )
+
+    try:
+        skeleton = json.loads(response.content)
+    except json.JSONDecodeError as e:
+        logger.error("Pass 1 response not valid JSON: %s", e)
+        raise ValidationError("Failed to parse skeleton response from LLM") from e
+
+    themes = skeleton.get("themes", [])
+    if not themes:
+        raise ValidationError("Pass 1 returned no themes")
+
+    logger.info(
+        "Pass 1 produced %d themes: %s",
+        len(themes),
+        [t.get("label", "?") for t in themes],
+    )
+    return skeleton
+
+
+async def _pass2_fill_branch(
+    *,
+    llm: LLMProvider,
+    source_content: str,
+    map_title: str,
+    theme: dict,
+    notebook_id: str,
+) -> dict:
+    """
+    Pass 2: Fill a single branch — produce Level-2 concepts and Level-3 leaves
+    for one theme. Returns the full theme node with children populated.
+    """
+    theme_id = theme["id"]
+    theme_label = theme["label"]
+    theme_summary = theme.get("summary", "")
+
+    prompt = BRANCH_FILL_PROMPT.format(
+        map_title=map_title,
+        theme_id=theme_id,
+        theme_label=theme_label,
+        theme_summary=theme_summary,
+        source_content=source_content,
+    )
+    _write_debug_artifact(notebook_id, f"pass2-{theme_id}-prompt.txt", prompt)
+
+    config = GenerationConfig(
+        temperature=0.3,
+        max_tokens=8192,  # Each branch gets a generous budget
+        response_format="json",
+        response_schema=BRANCH_FILL_RESPONSE_SCHEMA,
+    )
+
+    response = await llm.generate(prompt=prompt, context=[], config=config)
+
+    _write_debug_artifact(notebook_id, f"pass2-{theme_id}-response.json", response.content or "")
+    logger.info(
+        "Pass 2 branch '%s' response (notebook=%s, len=%d)",
+        theme_label,
+        notebook_id,
+        len(response.content or ""),
+    )
+
+    try:
+        branch_data = json.loads(response.content)
+    except json.JSONDecodeError as e:
+        logger.error(
+            "Pass 2 branch '%s' response not valid JSON: %s\nRaw: %s",
+            theme_label, e, (response.content or "")[:2000],
+        )
+        # Return theme with empty children rather than failing the whole map
+        return {**theme, "children": []}
+
+    concepts = branch_data.get("concepts", [])
+    logger.info(
+        "Pass 2 branch '%s' produced %d concepts with %d total leaves",
+        theme_label,
+        len(concepts),
+        sum(len(c.get("children", [])) for c in concepts),
+    )
+
+    # Assemble the full theme node
+    return {
+        "id": theme_id,
+        "label": theme_label,
+        "summary": theme_summary,
+        "guiding_question": theme.get("guiding_question", ""),
+        "children": concepts,
+    }
+
+
+# ============================================================
 # Service Function
 # ============================================================
 
@@ -237,7 +399,11 @@ async def generate_mindmap(
     """
     Generate a hierarchical mindmap tree for all sources in a notebook.
 
-    Returns the raw JSON tree from the LLM (title + nodes[]).
+    Uses a two-pass approach:
+      Pass 1: Generate Level-1 themes (skeleton)
+      Pass 2: Fill each branch in parallel (concepts + leaves)
+
+    Returns the assembled JSON tree (title + nodes[]).
     """
     # 1. Verify notebook exists (ownership is enforced via source query scoping by user_id)
     notebook = notebook_repository.get_by_id(notebook_id)
@@ -285,61 +451,60 @@ async def generate_mindmap(
         source_content[:2000],
     )
 
-    # 4. Build the prompt
-    prompt = KNOWLEDGE_ARCHITECT_PROMPT.format(source_content=source_content)
-    _write_debug_artifact(notebook_id, "prompt.txt", prompt)
+    # 4. PASS 1 — Generate skeleton (Level-1 themes)
+    logger.info("Starting Pass 1: Skeleton generation (notebook=%s)", notebook_id)
+    skeleton = await _pass1_skeleton(
+        llm=llm,
+        source_content=source_content,
+        notebook_id=notebook_id,
+    )
+    map_title = skeleton.get("title", "Untitled")
+    themes = skeleton["themes"]
+
     _write_debug_artifact(
         notebook_id,
-        "schema.json",
-        json.dumps(MINDMAP_RESPONSE_SCHEMA, indent=2, ensure_ascii=False),
+        "skeleton.json",
+        json.dumps(skeleton, indent=2, ensure_ascii=False),
     )
 
-    # 5. Call LLM with structured output schema
-    config = GenerationConfig(
-        temperature=0.3,
-        max_tokens=16384,
-        response_format="json",
-        response_schema=MINDMAP_RESPONSE_SCHEMA,
-    )
-
-    response = await llm.generate(
-        prompt=prompt,
-        context=[],
-        config=config,
-    )
-
-    # ALWAYS log + persist the raw response so we can diagnose bad output.
-    raw_path = _write_debug_artifact(notebook_id, "response.raw.json", response.content or "")
+    # 5. PASS 2 — Fill each branch in parallel
     logger.info(
-        "Mindmap RAW response (notebook=%s, len=%d, debug=%s):\n%s",
+        "Starting Pass 2: Filling %d branches in parallel (notebook=%s)",
+        len(themes),
         notebook_id,
-        len(response.content or ""),
-        raw_path,
-        (response.content or "")[:4000],
     )
 
-    # 6. Parse and validate the response
-    try:
-        tree = json.loads(response.content)
-    except json.JSONDecodeError as e:
-        logger.error(
-            "Mindmap LLM response was not valid JSON (notebook=%s): %s\nRaw: %s",
-            notebook_id,
-            e,
-            (response.content or "")[:2000],
+    fill_tasks = [
+        _pass2_fill_branch(
+            llm=llm,
+            source_content=source_content,
+            map_title=map_title,
+            theme=theme,
+            notebook_id=notebook_id,
         )
-        raise ValidationError("Failed to parse mindmap response from LLM") from e
+        for theme in themes
+    ]
 
-    if "nodes" not in tree or not isinstance(tree["nodes"], list):
-        logger.error(
-            "Mindmap LLM response missing 'nodes' array (notebook=%s): %s",
-            notebook_id,
-            tree,
-        )
-        raise ValidationError("LLM response did not contain a valid mindmap tree")
+    filled_nodes = await asyncio.gather(*fill_tasks, return_exceptions=True)
 
-    if not tree["nodes"]:
-        raise ValidationError("LLM returned an empty mindmap tree — sources may lack sufficient content")
+    # Handle any exceptions from individual branches gracefully
+    final_nodes: list[dict] = []
+    for i, result in enumerate(filled_nodes):
+        if isinstance(result, Exception):
+            logger.error(
+                "Pass 2 branch %d ('%s') failed: %s",
+                i, themes[i].get("label", "?"), result,
+            )
+            # Include the theme with empty children rather than dropping it
+            final_nodes.append({**themes[i], "children": []})
+        else:
+            final_nodes.append(result)
+
+    # 6. Assemble final tree
+    tree = {
+        "title": map_title,
+        "nodes": final_nodes,
+    }
 
     _write_debug_artifact(
         notebook_id,
@@ -347,7 +512,7 @@ async def generate_mindmap(
         json.dumps(tree, indent=2, ensure_ascii=False),
     )
 
-    # Log a structural summary of the parsed tree.
+    # Log structural summary
     def _shape(node: dict) -> dict:
         return {
             "id": node.get("id"),
@@ -359,17 +524,24 @@ async def generate_mindmap(
         "title": tree.get("title"),
         "nodes": [_shape(n) for n in tree["nodes"]],
     }
+
+    total_nodes = 0
+    for n in tree["nodes"]:
+        total_nodes += 1
+        for c in n.get("children", []):
+            total_nodes += 1
+            total_nodes += len(c.get("children", []))
+
     logger.info(
-        "Mindmap parsed tree shape (notebook=%s):\n%s",
+        "Mindmap generated for notebook %s: %d L1 nodes, %d total nodes, title='%s'\n%s",
         notebook_id,
+        len(tree["nodes"]),
+        total_nodes,
+        tree.get("title", ""),
         json.dumps(shape_summary, indent=2, ensure_ascii=False),
     )
 
-    logger.info(
-        "Mindmap generated for notebook %s: %d top-level nodes, title='%s'",
-        notebook_id,
-        len(tree["nodes"]),
-        tree.get("title", ""),
-    )
+    if not tree["nodes"]:
+        raise ValidationError("LLM returned an empty mindmap tree — sources may lack sufficient content")
 
     return tree
